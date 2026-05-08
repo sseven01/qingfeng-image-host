@@ -32,6 +32,8 @@ const deleteFolderDialog = $("#deleteFolderDialog");
 const deleteFolderMessage = $("#deleteFolderMessage");
 const cancelDeleteFolderBtn = $("#cancelDeleteFolderBtn");
 const confirmDeleteFolderBtn = $("#confirmDeleteFolderBtn");
+const toast = $("#toast");
+let toastTimer = null;
 
 async function api(url, options = {}) {
   const response = await fetch(url, {
@@ -286,9 +288,47 @@ function buildImageDetail(image, showFolder) {
   return parts.join(" · ");
 }
 
+function showToast(message, type = "success") {
+  clearTimeout(toastTimer);
+  toast.textContent = message;
+  toast.className = `toast ${type}`;
+  toastTimer = setTimeout(() => {
+    toast.classList.add("hidden");
+  }, 2200);
+}
+
+function fallbackCopy(text) {
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  textarea.style.top = "0";
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  textarea.setSelectionRange(0, textarea.value.length);
+  const ok = document.execCommand("copy");
+  textarea.remove();
+  if (!ok) throw new Error("复制失败");
+}
+
 async function copy(text) {
-  await navigator.clipboard.writeText(text);
-  alert("已复制");
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      fallbackCopy(text);
+    }
+    showToast("已复制到剪贴板");
+  } catch (error) {
+    try {
+      fallbackCopy(text);
+      showToast("已复制到剪贴板");
+    } catch {
+      showToast("复制失败，请手动选中文本复制", "error");
+    }
+  }
 }
 
 async function uploadFiles(files) {

@@ -546,6 +546,27 @@ section {
   color: #fff;
 }
 
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  z-index: 70;
+  transform: translateX(-50%);
+  max-width: calc(100vw - 32px);
+  border: 1px solid #99d1ca;
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--accent-strong);
+  box-shadow: 0 14px 38px rgba(23, 32, 38, 0.16);
+  padding: 10px 14px;
+  font-size: 14px;
+}
+
+.toast.error {
+  border-color: #f3b7b0;
+  color: var(--danger);
+}
+
 @media (max-width: 820px) {
   .app {
     grid-template-columns: 1fr;
