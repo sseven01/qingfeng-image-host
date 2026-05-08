@@ -33,6 +33,11 @@ const deleteFolderMessage = $("#deleteFolderMessage");
 const cancelDeleteFolderBtn = $("#cancelDeleteFolderBtn");
 const confirmDeleteFolderBtn = $("#confirmDeleteFolderBtn");
 const toast = $("#toast");
+const uploadProgressPanel = $("#uploadProgressPanel");
+const uploadProgressSummary = $("#uploadProgressSummary");
+const uploadProgressPercent = $("#uploadProgressPercent");
+const uploadProgressBar = $("#uploadProgressBar");
+const uploadFileList = $("#uploadFileList");
 let toastTimer = null;
 
 async function api(url, options = {}) {
@@ -333,15 +338,22 @@ async function copy(text) {
 
 async function uploadFiles(files) {
   if (!files.length) return;
+  showUploadProgress(files);
   const form = new FormData();
   form.append("path", state.path);
   Array.from(files).forEach((file) => form.append("images", file));
-  const response = await fetch("/api/upload", { method: "POST", body: form });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || "上传失败");
-  state.lastUploaded = data.images || [];
-  showUploadResult(state.lastUploaded);
-  await loadAll();
+  try {
+    const data = await uploadRequest(form, (loaded, total) => {
+      updateUploadProgress((loaded / total) * 100, loaded, total);
+    });
+    state.lastUploaded = data.images || [];
+    finishUploadProgress(state.lastUploaded);
+    showUploadResult(state.lastUploaded);
+    await loadAll();
+  } catch (error) {
+    failUploadProgress(error.message);
+    throw error;
+  }
 }
 
 function showUploadResult(images) {
@@ -354,6 +366,101 @@ function showUploadResult(images) {
 
 function uploadMarkdown() {
   return state.lastUploaded.map((image) => `![${image.filename}](${image.url})`).join("\n");
+}
+
+function showUploadProgress(files) {
+  const fileList = Array.from(files);
+  const totalSize = fileList.reduce((sum, file) => sum + file.size, 0);
+  uploadProgressPanel.classList.remove("hidden");
+  uploadProgressBar.style.width = "0%";
+  uploadProgressPercent.textContent = "0%";
+  uploadProgressSummary.textContent = `${fileList.length} 个文件，${formatSize(totalSize)}，准备上传到 ${state.path}`;
+  uploadFileList.innerHTML = "";
+  fileList.forEach((file, index) => {
+    const item = document.createElement("div");
+    item.className = "upload-file";
+    item.dataset.index = String(index);
+    item.innerHTML = `
+      <div class="upload-file-main">
+        <strong title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</strong>
+        <span>${formatSize(file.size)} · 等待上传</span>
+      </div>
+      <span class="upload-file-status">等待</span>
+    `;
+    uploadFileList.appendChild(item);
+  });
+}
+
+function updateUploadProgress(percent, loaded, total) {
+  const safePercent = Math.max(0, Math.min(100, Math.round(percent)));
+  uploadProgressBar.style.width = `${safePercent}%`;
+  uploadProgressPercent.textContent = `${safePercent}%`;
+  const sizeText = total ? `${formatSize(loaded)} / ${formatSize(total)}` : formatSize(loaded);
+  uploadProgressSummary.textContent = `${sizeText}，正在上传到 ${state.path}`;
+  uploadFileList.querySelectorAll(".upload-file").forEach((item) => {
+    item.classList.add("uploading");
+    item.querySelector(".upload-file-status").textContent = "上传中";
+    const meta = item.querySelector(".upload-file-main span");
+    meta.textContent = meta.textContent.replace("等待上传", "上传中");
+  });
+}
+
+function finishUploadProgress(images) {
+  uploadProgressBar.style.width = "100%";
+  uploadProgressPercent.textContent = "100%";
+  uploadProgressSummary.textContent = `上传完成，成功 ${images.length} 张`;
+  const items = Array.from(uploadFileList.querySelectorAll(".upload-file"));
+  items.forEach((item, index) => {
+    item.classList.remove("uploading", "failed");
+    item.classList.add("done");
+    const uploaded = images[index];
+    const status = item.querySelector(".upload-file-status");
+    const meta = item.querySelector(".upload-file-main span");
+    status.textContent = "完成";
+    meta.textContent = uploaded ? `${formatSize(uploaded.size)} · ${uploaded.filename}` : meta.textContent.replace("上传中", "完成");
+  });
+}
+
+function failUploadProgress(message) {
+  uploadProgressBar.style.width = "100%";
+  uploadProgressPercent.textContent = "失败";
+  uploadProgressSummary.textContent = message;
+  uploadFileList.querySelectorAll(".upload-file").forEach((item) => {
+    item.classList.remove("uploading", "done");
+    item.classList.add("failed");
+    item.querySelector(".upload-file-status").textContent = "失败";
+  });
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function uploadRequest(form, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/upload");
+    xhr.upload.addEventListener("progress", (event) => {
+      if (!event.lengthComputable) return;
+      onProgress(event.loaded, event.total);
+    });
+    xhr.addEventListener("load", () => {
+      const data = JSON.parse(xhr.responseText || "{}");
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(data);
+      } else {
+        reject(new Error(data.error || "上传失败"));
+      }
+    });
+    xhr.addEventListener("error", () => reject(new Error("网络错误，上传失败")));
+    xhr.addEventListener("abort", () => reject(new Error("上传已取消")));
+    xhr.send(form);
+  });
 }
 
 async function renameImage(image) {

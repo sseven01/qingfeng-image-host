@@ -58,6 +58,20 @@
           <span>拖拽图片到这里上传</span>
         </div>
 
+        <section id="uploadProgressPanel" class="upload-progress hidden">
+          <div class="upload-progress-head">
+            <div>
+              <h2>上传详情</h2>
+              <span id="uploadProgressSummary">准备上传</span>
+            </div>
+            <strong id="uploadProgressPercent">0%</strong>
+          </div>
+          <div class="progress-track">
+            <div id="uploadProgressBar" class="progress-bar"></div>
+          </div>
+          <div id="uploadFileList" class="upload-file-list"></div>
+        </section>
+
         <section id="foldersSection">
           <h2>目录</h2>
           <div id="folders" class="folder-grid"></div>
