@@ -71,38 +71,117 @@ private-image-host/
 
 ## 1Panel 部署
 
-1. 在服务器安装 Node.js 18 或更高版本。
-2. 上传项目到服务器，例如 `/opt/private-image-host`。
-3. 在项目目录执行：
+下面以 1Panel 的 Node.js 容器运行环境为例。假设项目目录为：
+
+```text
+/opt/qingfeng-image-host
+```
+
+1. 在 1Panel 创建 Node.js 运行环境，Node.js 建议选择 18 或 20。
+2. 代码来源选择 Git，仓库地址填写：
+
+```text
+https://github.com/sseven01/qingfeng-image-host.git
+```
+
+3. 分支填写：
+
+```text
+main
+```
+
+4. 项目目录选择：
+
+```text
+/opt/qingfeng-image-host
+```
+
+5. 安装命令填写：
 
 ```bash
 npm install --omit=dev
-cp .env.example .env
 ```
 
-4. 编辑 `.env`：
-
-```env
-PORT=3000
-APP_PASSWORD=你的访问密码
-SESSION_SECRET=一串随机字符
-BASE_URL=https://你的图床域名
-TRUST_PROXY=true
-```
-
-5. 在 1Panel 创建网站，选择反向代理到：
-
-```text
-http://127.0.0.1:3000
-```
-
-6. 用 1Panel 的进程守护、Supervisor 或应用运行命令启动：
+6. 启动命令填写：
 
 ```bash
 npm start
 ```
 
-7. 在 1Panel 给域名申请 SSL 证书。
+7. 端口建议避开已有服务，例如使用 `3010`：
+
+```text
+容器端口：3010
+主机端口：3010
+```
+
+如果你已经有其他 Node.js 容器占用 `3000`，这里不要再填 `3000`。
+
+注意：不要把 `3010` 填到 `Hosts`、`主机映射`、`add-host` 之类字段里。那些字段不是端口映射，填错会出现类似错误：
+
+```text
+invalid IP address in add-host: "3010"
+```
+
+这类字段保持为空即可。
+
+8. 在项目根目录创建 `.env`，或在 1Panel 环境变量里添加：
+
+```env
+PORT=3010
+APP_PASSWORD=你的访问密码
+SESSION_SECRET=一串随机字符
+BASE_URL=https://你的图床域名
+MAX_FILE_SIZE_MB=10
+UPLOAD_DIR=uploads
+DATA_DIR=data
+TRUST_PROXY=true
+```
+
+`BASE_URL` 写正式域名，不需要带 `:3010`，例如：
+
+```text
+https://img.example.com
+```
+
+9. 数据持久化重点关注两个目录：
+
+```text
+/opt/qingfeng-image-host/uploads
+/opt/qingfeng-image-host/data
+```
+
+如果 1Panel 的项目目录本身就是宿主机持久目录，通常不需要额外挂载整个项目目录。部署后可以上传一张测试图片，然后重启容器确认图片和目录仍然存在。
+
+如果你的运行环境支持挂载目录，也可以额外确认：
+
+```text
+宿主机目录：/opt/qingfeng-image-host/uploads
+容器目录：/opt/qingfeng-image-host/uploads
+```
+
+```text
+宿主机目录：/opt/qingfeng-image-host/data
+容器目录：/opt/qingfeng-image-host/data
+```
+
+10. 启动 Node.js 运行环境后，创建网站并配置反向代理：
+
+```text
+http://127.0.0.1:3010
+```
+
+如果 1Panel 的反向代理无法访问 `127.0.0.1`，改用容器名：
+
+```text
+http://qingfeng-image-host:3010
+```
+
+11. 在 1Panel 给域名申请 SSL 证书。完成后访问：
+
+```text
+https://你的图床域名
+```
 
 ## 宝塔面板部署
 
