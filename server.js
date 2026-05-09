@@ -3,6 +3,7 @@ require("dotenv").config();
 const crypto = require("crypto");
 const fs = require("fs");
 const fsp = require("fs/promises");
+const os = require("os");
 const path = require("path");
 
 const express = require("express");
@@ -56,7 +57,14 @@ app.use(compression());
 
 const upload = multer({
   storage: multer.diskStorage({
-    destination: tmpRoot,
+    destination: async (req, file, cb) => {
+      try {
+        await fsp.mkdir(tmpRoot, { recursive: true });
+        cb(null, tmpRoot);
+      } catch {
+        cb(null, os.tmpdir());
+      }
+    },
     filename: (req, file, cb) => {
       const ext = path.extname(file.originalname).toLowerCase();
       cb(null, `${Date.now()}-${crypto.randomBytes(8).toString("hex")}${ext}`);
@@ -86,9 +94,9 @@ let metaCache = null;
 
 async function ensureBaseDirs() {
   await fsp.mkdir(uploadRoot, { recursive: true });
-  await fsp.mkdir(thumbRoot, { recursive: true });
   await fsp.mkdir(dataRoot, { recursive: true });
-  await fsp.mkdir(tmpRoot, { recursive: true });
+  await fsp.mkdir(thumbRoot, { recursive: true }).catch(() => {});
+  await fsp.mkdir(tmpRoot, { recursive: true }).catch(() => {});
   try {
     await fsp.access(metaPath);
   } catch {
@@ -528,7 +536,7 @@ app.use((error, req, res, next) => {
 async function startup() {
   await ensureBaseDirs();
   const tmpFiles = await fsp.readdir(tmpRoot).catch(() => []);
-  await Promise.all(tmpFiles.map((f) => fsp.rm(path.join(tmpRoot, f), { force: true })));
+  await Promise.all(tmpFiles.map((f) => fsp.rm(path.join(tmpRoot, f), { force: true }).catch(() => {})));
   app.listen(port, () => {
     console.log(`Private image host running at http://localhost:${port}`);
   });
