@@ -1,6 +1,6 @@
 {
   "name": "private-image-host",
-  "version": "1.0.0",
+  "version": "0.1.5",
   "description": "青枫图床 - a lightweight private image hosting app with folder management and password-protected admin.",
   "main": "server.js",
   "scripts": {
