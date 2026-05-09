@@ -83,7 +83,11 @@ app.use(
     cookie: {
       httpOnly: true,
       sameSite: "lax",
-      secure: process.env.COOKIE_SECURE === "true",
+      secure: process.env.COOKIE_SECURE === "true"
+        ? true
+        : process.env.TRUST_PROXY === "true"
+          ? 'auto'
+          : false,
       maxAge: 1000 * 60 * 60 * 24 * 7
     }
   })
