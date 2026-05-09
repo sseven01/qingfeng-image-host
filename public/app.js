@@ -38,6 +38,8 @@ const uploadProgressSummary = $("#uploadProgressSummary");
 const uploadProgressPercent = $("#uploadProgressPercent");
 const uploadProgressBar = $("#uploadProgressBar");
 const uploadFileList = $("#uploadFileList");
+const loadMoreContainer = $("#loadMoreContainer");
+const loadMoreBtn = $("#loadMoreBtn");
 let toastTimer = null;
 
 async function api(url, options = {}) {
@@ -67,6 +69,7 @@ function showLogin() {
 }
 
 async function loadAll() {
+  state.currentPage = 1;
   await loadTree();
   await loadItems();
 }
@@ -177,7 +180,7 @@ function renderTreeNode(node, depth, query) {
   return true;
 }
 
-async function loadItems() {
+async function loadItems(append = false) {
   const imageQuery = getImageQuery();
   if (imageQuery) {
     const data = await api(`/api/images/search?q=${encodeURIComponent(imageQuery)}`);
@@ -185,16 +188,29 @@ async function loadItems() {
     imagesTitle.textContent = "搜索结果";
     imagesSummary.textContent = `${data.images.length} 张图片`;
     renderImages(data.images, { showFolder: true });
+    state.hasMore = false;
+    renderLoadMore();
     return;
   }
 
-  const data = await api(`/api/items?path=${encodeURIComponent(state.path)}`);
+  const page = append ? (state.currentPage || 1) + 1 : 1;
+  const data = await api(`/api/items?path=${encodeURIComponent(state.path)}&page=${page}&limit=50`);
+  state.currentPage = data.page;
+  state.hasMore = data.hasMore;
+
   currentPathEl.textContent = data.path;
   foldersSection.classList.remove("hidden");
   imagesTitle.textContent = "图片";
-  imagesSummary.textContent = `${data.images.length} 张图片`;
-  renderFolders(data.folders);
-  renderImages(data.images, { showFolder: false });
+  imagesSummary.textContent = `${data.total} 张图片`;
+
+  if (page === 1) {
+    renderFolders(data.folders);
+    renderImages(data.images, { showFolder: false });
+  } else {
+    appendImages(data.images, { showFolder: false });
+  }
+
+  renderLoadMore();
 }
 
 function renderFolders(folders) {
@@ -268,22 +284,41 @@ function renderImages(images, options = {}) {
   }
   const template = $("#imageTemplate");
   images.forEach((image) => {
-    const node = template.content.cloneNode(true);
-    const card = node.querySelector(".image-card");
-    const thumb = node.querySelector(".thumb");
-    const title = node.querySelector("strong");
-    const detail = node.querySelector("span");
-    thumb.style.backgroundImage = `url("${image.url}")`;
-    thumb.title = image.url;
-    thumb.addEventListener("click", () => window.open(image.url, "_blank"));
-    title.textContent = image.filename;
-    detail.textContent = buildImageDetail(image, options.showFolder);
-    card.querySelector('[data-action="copy"]').addEventListener("click", () => copy(image.url));
-    card.querySelector('[data-action="markdown"]').addEventListener("click", () => copy(`![${image.filename}](${image.url})`));
-    card.querySelector('[data-action="rename"]').addEventListener("click", () => renameImage(image));
-    card.querySelector('[data-action="delete"]').addEventListener("click", () => deleteImage(image));
-    imagesEl.appendChild(node);
+    imagesEl.appendChild(buildImageCard(template, image, options));
   });
+}
+
+function appendImages(images, options = {}) {
+  const template = $("#imageTemplate");
+  images.forEach((image) => {
+    imagesEl.appendChild(buildImageCard(template, image, options));
+  });
+}
+
+function buildImageCard(template, image, options = {}) {
+  const node = template.content.cloneNode(true);
+  const card = node.querySelector(".image-card");
+  const thumb = node.querySelector(".thumb");
+  const title = node.querySelector("strong");
+  const detail = node.querySelector("span");
+  thumb.style.backgroundImage = `url("${image.thumbUrl || image.url}")`;
+  thumb.title = image.url;
+  thumb.addEventListener("click", () => window.open(image.url, "_blank"));
+  title.textContent = image.filename;
+  detail.textContent = buildImageDetail(image, options.showFolder);
+  card.querySelector('[data-action="copy"]').addEventListener("click", () => copy(image.url));
+  card.querySelector('[data-action="markdown"]').addEventListener("click", () => copy(`![${image.filename}](${image.url})`));
+  card.querySelector('[data-action="rename"]').addEventListener("click", () => renameImage(image));
+  card.querySelector('[data-action="delete"]').addEventListener("click", () => deleteImage(image));
+  return node;
+}
+
+function renderLoadMore() {
+  if (state.hasMore) {
+    loadMoreContainer.classList.remove("hidden");
+  } else {
+    loadMoreContainer.classList.add("hidden");
+  }
 }
 
 function buildImageDetail(image, showFolder) {
@@ -500,7 +535,7 @@ $("#logoutBtn").addEventListener("click", async () => {
 });
 
 folderSearchInput.addEventListener("input", renderTree);
-imageSearchInput.addEventListener("input", loadItems);
+imageSearchInput.addEventListener("input", () => loadItems());
 clearImageSearchBtn.addEventListener("click", async () => {
   imageSearchInput.value = "";
   await loadItems();
@@ -532,6 +567,14 @@ confirmDeleteFolderBtn.addEventListener("click", async () => {
   }
 });
 
+loadMoreBtn.addEventListener("click", async () => {
+  try {
+    await loadItems(true);
+  } catch (error) {
+    alert(error.message);
+  }
+});
+
 document.addEventListener("click", (event) => {
   if (!folderContextMenu.contains(event.target)) {
     closeFolderContextMenu();
@@ -542,6 +585,26 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     closeFolderContextMenu();
     closeDeleteFolderDialog();
+  }
+});
+
+document.addEventListener("paste", async (event) => {
+  if (appView.classList.contains("hidden")) return;
+  const items = event.clipboardData && event.clipboardData.items;
+  if (!items) return;
+  const files = [];
+  for (const item of items) {
+    if (item.type.startsWith("image/")) {
+      files.push(item.getAsFile());
+    }
+  }
+  if (files.length) {
+    event.preventDefault();
+    try {
+      await uploadFiles(files);
+    } catch (error) {
+      alert(error.message);
+    }
   }
 });
 

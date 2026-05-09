@@ -3,4 +3,8 @@ node_modules/
 data/*.json
 uploads/*
 !uploads/.gitkeep
+thumbs/*
+tmp/
+lazygit.exe
+*.tmp
 npm-debug.log*
