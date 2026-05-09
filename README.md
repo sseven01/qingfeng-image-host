@@ -11,13 +11,15 @@
 - 支持输入 `\aaa\bbb\ccc` 一次创建多级目录
 - 支持右键目录后警告确认删除目录
 - 图片名称和路径搜索
-- 单图、多图、拖拽上传
+- 单图、多图、拖拽上传、**粘贴上传（Ctrl+V）**
 - 上传时显示总体进度、文件清单和上传状态
 - 多图上传后输出本次上传的全部直链和 Markdown
+- **上传自动生成 400px 宽缩略图，网格视图秒加载**
 - 自动处理重名文件
 - 图片网格预览
 - 一键复制直链和 Markdown
 - 删除、重命名图片
+- **图片列表分页加载，大数据量不卡顿**
 - 本地文件存储，无数据库原生依赖
 
 ## 本地运行
@@ -48,7 +50,9 @@ BASE_URL=https://img.example.com
 MAX_FILE_SIZE_MB=10
 UPLOAD_DIR=uploads
 DATA_DIR=data
+THUMB_DIR=thumbs
 TRUST_PROXY=false
+COOKIE_SECURE=false
 ```
 
 生产环境建议：
@@ -56,7 +60,7 @@ TRUST_PROXY=false
 - `APP_PASSWORD` 改成强密码
 - `SESSION_SECRET` 改成随机长字符串
 - `BASE_URL` 改成你的图床域名
-- 如果通过反向代理启用 HTTPS，可设置 `TRUST_PROXY=true`
+- 如果通过反向代理启用 HTTPS，可设置 `TRUST_PROXY=true` 和 `COOKIE_SECURE=true`
 
 ## 目录说明
 
@@ -64,11 +68,13 @@ TRUST_PROXY=false
 private-image-host/
   data/           # 元数据 meta.json
   uploads/        # 图片文件
+  thumbs/         # 缩略图文件
+  tmp/            # 上传临时文件（启动自动清理）
   public/         # 前端页面
   server.js       # 服务端
 ```
 
-备份时重点备份 `uploads/` 和 `data/meta.json`。
+备份时重点备份 `uploads/`、`thumbs/` 和 `data/meta.json`。
 
 ## 1Panel 部署
 
@@ -136,7 +142,9 @@ BASE_URL=https://你的图床域名
 MAX_FILE_SIZE_MB=10
 UPLOAD_DIR=uploads
 DATA_DIR=data
+THUMB_DIR=thumbs
 TRUST_PROXY=true
+COOKIE_SECURE=true
 ```
 
 `BASE_URL` 写正式域名，不需要带 `:3010`，例如：
@@ -145,10 +153,11 @@ TRUST_PROXY=true
 https://img.example.com
 ```
 
-9. 数据持久化重点关注两个目录：
+9. 数据持久化重点关注以下目录：
 
 ```text
 /opt/qingfeng-image-host/uploads
+/opt/qingfeng-image-host/thumbs
 /opt/qingfeng-image-host/data
 ```
 
@@ -159,6 +168,11 @@ https://img.example.com
 ```text
 宿主机目录：/opt/qingfeng-image-host/uploads
 容器目录：/opt/qingfeng-image-host/uploads
+```
+
+```text
+宿主机目录：/opt/qingfeng-image-host/thumbs
+容器目录：/opt/qingfeng-image-host/thumbs
 ```
 
 ```text
@@ -202,6 +216,7 @@ APP_PASSWORD=你的访问密码
 SESSION_SECRET=一串随机字符
 BASE_URL=https://你的图床域名
 TRUST_PROXY=true
+COOKIE_SECURE=true
 ```
 
 5. 在宝塔 Node 项目里添加项目：
