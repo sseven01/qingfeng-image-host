@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>青枫图床</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main id="loginView" class="login">
+      <form id="loginForm" class="login-panel">
+        <div>
+          <p class="eyebrow">青枫图床</p>
+          <h1>输入访问密码</h1>
+        </div>
+        <input id="passwordInput" type="password" placeholder="访问密码" autocomplete="current-password" required />
+        <button type="submit">进入后台</button>
+        <p id="loginError" class="error"></p>
+      </form>
+    </main>
+
+    <main id="appView" class="app hidden">
+      <aside class="sidebar">
+        <div class="brand">
+          <strong>青枫图床</strong>
+          <button id="logoutBtn" title="退出登录">退出</button>
+        </div>
+        <div class="tree-search">
+          <input id="folderSearchInput" type="search" placeholder="搜索目录名称" autocomplete="off" />
+        </div>
+        <div id="tree" class="tree"></div>
+      </aside>
+
+      <section class="workspace">
+        <header class="toolbar">
+          <div>
+            <p class="eyebrow">当前目录</p>
+            <h1 id="currentPath">/</h1>
+          </div>
+          <div class="actions">
+            <form id="newFolderForm" class="new-folder-form">
+              <input id="newFolderPathInput" type="text" placeholder="新建路径，如 \aaa\bbb\ccc" autocomplete="off" />
+              <button type="submit">新建</button>
+            </form>
+            <label class="upload-btn">
+              上传图片
+              <input id="fileInput" type="file" accept="image/*" multiple />
+            </label>
+          </div>
+        </header>
+
+        <div class="image-search">
+          <input id="imageSearchInput" type="search" placeholder="搜索图片名称或路径" autocomplete="off" />
+          <button id="clearImageSearchBtn" type="button">清空</button>
+        </div>
+
+        <div id="dropZone" class="drop-zone">
+          <span>拖拽图片到这里上传</span>
+        </div>
+
+        <section id="uploadProgressPanel" class="upload-progress hidden">
+          <div class="upload-progress-head">
+            <div>
+              <h2>上传详情</h2>
+              <span id="uploadProgressSummary">准备上传</span>
+            </div>
+            <strong id="uploadProgressPercent">0%</strong>
+          </div>
+          <div class="progress-track">
+            <div id="uploadProgressBar" class="progress-bar"></div>
+          </div>
+          <div id="uploadFileList" class="upload-file-list"></div>
+        </section>
+
+        <section id="foldersSection">
+          <h2>目录</h2>
+          <div id="folders" class="folder-grid"></div>
+        </section>
+
+        <section>
+          <div class="section-heading">
+            <h2 id="imagesTitle">图片</h2>
+            <span id="imagesSummary"></span>
+          </div>
+          <div id="images" class="image-grid"></div>
+          <div id="loadMoreContainer" class="hidden" style="text-align:center;margin-top:16px;">
+            <button id="loadMoreBtn" type="button">加载更多</button>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <div id="uploadResult" class="upload-result hidden">
+      <div class="upload-result-head">
+        <strong>上传完成</strong>
+        <button id="closeUploadResultBtn" type="button">关闭</button>
+      </div>
+      <p id="uploadResultSummary"></p>
+      <label>
+        图片直链
+        <textarea id="uploadLinksText" readonly></textarea>
+      </label>
+      <div class="upload-result-actions">
+        <button id="copyUploadLinksBtn" type="button">复制全部直链</button>
+        <button id="copyUploadMarkdownBtn" type="button">复制 Markdown</button>
+      </div>
+    </div>
+
+    <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
+    <template id="folderTemplate">
+      <button class="folder-card">
+        <span class="folder-icon">□</span>
+        <span class="folder-main">
+          <span class="folder-name"></span>
+          <span class="folder-count"></span>
+        </span>
+      </button>
+    </template>
+
+    <div id="folderContextMenu" class="context-menu hidden">
+      <button id="deleteFolderMenuBtn" type="button">删除目录</button>
+    </div>
+
+    <div id="deleteFolderDialog" class="dialog-backdrop hidden">
+      <div class="dialog">
+        <p class="eyebrow">危险操作</p>
+        <h2>删除目录</h2>
+        <p id="deleteFolderMessage"></p>
+        <div class="dialog-actions">
+          <button id="cancelDeleteFolderBtn" type="button">取消</button>
+          <button id="confirmDeleteFolderBtn" class="danger-btn" type="button">确认删除</button>
+        </div>
+      </div>
+    </div>
+
+    <template id="imageTemplate">
+      <article class="image-card">
+        <button class="thumb"></button>
+        <div class="image-meta">
+          <strong></strong>
+          <span></span>
+        </div>
+        <div class="image-actions">
+          <button data-action="copy">复制链接</button>
+          <button data-action="markdown">Markdown</button>
+          <button data-action="rename">重命名</button>
+          <button data-action="delete">删除</button>
+        </div>
+      </article>
+    </template>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

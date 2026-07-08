@@ -1,0 +1,10 @@
+node_modules/
+.env
+data/*.json
+uploads/*
+!uploads/.gitkeep
+thumbs/*
+tmp/
+lazygit.exe
+*.tmp
+npm-debug.log*
