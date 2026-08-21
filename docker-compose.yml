@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  qingfeng-image-host:
+    build: .
+    container_name: qingfeng-image-host
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./uploads:/app/uploads
+      - ./data:/app/data
+      - ./thumbs:/app/thumbs
+    environment:
+      - PORT=3000
+      - APP_PASSWORD=${APP_PASSWORD:-change-this-password}
+      - SESSION_SECRET=${SESSION_SECRET:-change-this-random-secret}
+      - BASE_URL=${BASE_URL:-http://localhost:3000}
+      - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-10}
+      - TRUST_PROXY=${TRUST_PROXY:-false}
+      - COOKIE_SECURE=${COOKIE_SECURE:-false}
