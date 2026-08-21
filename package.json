@@ -15,14 +15,10 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "compression": "^1.8.1",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
-    "express-rate-limit": "^8.5.1",
     "express-session": "^1.18.1",
-    "helmet": "^8.1.0",
-    "morgan": "^1.10.1",
-    "multer": "^2.1.1",
-    "sharp": "^0.34.5"
+    "image-size": "^1.2.1",
+    "multer": "^2.1.1"
   }
 }

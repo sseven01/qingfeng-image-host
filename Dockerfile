@@ -1,18 +1,4 @@
-# 第一阶段：构建依赖
-FROM node:20-alpine AS builder
-
-RUN apk add --no-cache vips-dev build-base python3
-
-WORKDIR /app
-
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
-
-# 第二阶段：运行
 FROM node:20-alpine
-
-# 只安装运行时需要的 vips
-RUN apk add --no-cache vips
 
 # 创建非 root 用户
 RUN addgroup -g 1001 -S appgroup && \
@@ -20,8 +6,11 @@ RUN addgroup -g 1001 -S appgroup && \
 
 WORKDIR /app
 
-# 从构建阶段复制 node_modules
-COPY --from=builder /app/node_modules ./node_modules
+# 先复制依赖文件，利用 Docker 缓存层
+COPY package.json ./
+
+# 安装依赖
+RUN npm install --omit=dev
 
 # 复制项目文件
 COPY . .
