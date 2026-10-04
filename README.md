@@ -81,6 +81,71 @@ private-image-host/
 
 备份时重点备份 `uploads/`、`thumbs/` 和 `data/meta.json`。
 
+## Docker 部署（推荐）
+
+镜像由 GitHub Actions 自动构建并发布到 GitHub 容器仓库（GHCR），服务器上不需要拉源码，拉镜像即可部署。
+
+### 镜像地址与标签
+
+```text
+ghcr.io/sseven01/qingfeng-image-host
+```
+
+| 标签 | 说明 |
+|---|---|
+| `master` | 每次 push 到 master 分支自动构建，**日常部署用这个** |
+| `vX.Y.Z` | 打 `v*` 版本标签时构建，用于固定版本回滚 |
+
+### 方式一：docker run 直接部署
+
+1. 准备 `.env`（参考上方「配置」一节，含密码、`BASE_URL`、`API_TOKEN` 等）。
+2. 拉取并启动：
+
+```bash
+docker pull ghcr.io/sseven01/qingfeng-image-host:master
+
+docker run -d \
+  --name qingfeng-image-host \
+  --restart unless-stopped \
+  -p 3000:3000 \
+  --env-file .env \
+  -v "$PWD/uploads:/app/uploads" \
+  -v "$PWD/data:/app/data" \
+  -v "$PWD/thumbs:/app/thumbs" \
+  ghcr.io/sseven01/qingfeng-image-host:master
+```
+
+如果镜像包是私有的，先登录（PAT 需要 `read:packages` 权限；公开包可跳过）：
+
+```bash
+echo <PAT> | docker login ghcr.io -u <GitHub用户名> --password-stdin
+```
+
+### 方式二：docker-compose 部署
+
+本仓库自带 `docker-compose.yml`（含端口映射、数据卷、环境变量透传）。两种用法：
+
+```bash
+# 本地构建运行（默认 build: .）
+docker-compose up -d
+
+# 或改为拉取 GHCR 镜像：把 docker-compose.yml 里的 build: . 换成
+#   image: ghcr.io/sseven01/qingfeng-image-host:master
+# 然后
+docker-compose up -d
+```
+
+常用命令：`docker-compose up -d` 启动、`docker-compose down` 停止、`docker-compose logs -f` 看日志。
+
+### 更新版本
+
+```bash
+docker pull ghcr.io/sseven01/qingfeng-image-host:master
+docker-compose up -d --force-recreate   # 或 docker rm -f 后重新 docker run
+```
+
+数据在挂载卷里，重建容器不丢图片。上线后同样需要 Nginx 反向代理 + HTTPS（见下文）。
+
 ## 1Panel 部署
 
 下面以 1Panel 的 Node.js 容器运行环境为例。假设项目目录为：
