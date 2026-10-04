@@ -32,24 +32,24 @@ ghcr.io/sseven01/qingfeng-image-host
 ```bash
 docker pull ghcr.io/sseven01/qingfeng-image-host:master
 
-QF_ROOT=/data/img   # 换成你的主文件夹
-mkdir -p "$QF_ROOT" && chown -R 1001:1001 "$QF_ROOT"   # 仅首次：授权（容器 uid 1001）
+# 仅首次：创建主文件夹并授权（容器 uid 1001；路径换成你自己的）
+mkdir -p /data/img && chown -R 1001:1001 /data/img
 
 docker run -d --name qingfeng-image-host --restart unless-stopped -p 3000:3000 \
-  -v "$QF_ROOT:/app/storage" \
+  -v /data/img:/app/storage \
   ghcr.io/sseven01/qingfeng-image-host:master
 ```
 
 **macOS / Windows（Docker Desktop）差异：**
 
-| 系统 | 主文件夹示例 | chown | 注意 |
+| 系统 | 把路径换成 | chown | 注意 |
 |---|---|---|---|
-| macOS | `QF_ROOT=$HOME/qingfeng-img` | 不需要 | 路径需在 Docker Desktop 共享目录内 |
-| Windows PowerShell | `$QF_ROOT = "D:\qingfeng-img"` | 不需要 | 命令写成单行；PS 换行符是反引号 `` ` ``，不是 `\` |
+| macOS | `/Users/你的用户名/qingfeng-img` | 不需要 | 路径需在 Docker Desktop 共享目录内 |
+| Windows PowerShell | `D:\qingfeng-img` | 不需要 | 命令写成单行；PS 换行符是反引号 `` ` ``，不是 `\` |
 
 ```powershell
 # Windows 单行完整命令
-docker run -d --name qingfeng-image-host --restart unless-stopped -p 3000:3000 -v "${QF_ROOT}:/app/storage" ghcr.io/sseven01/qingfeng-image-host:master
+docker run -d --name qingfeng-image-host --restart unless-stopped -p 3000:3000 -v "D:\qingfeng-img:/app/storage" ghcr.io/sseven01/qingfeng-image-host:master
 ```
 
 镜像为私有时先登录（公开包跳过）：
@@ -81,13 +81,19 @@ docker rm -f qingfeng-image-host
 
 ### docker-compose 方式（可选）
 
+在项目目录的 `.env` 里写一行主文件夹路径即可（compose 用固定的配置键 `QF_ROOT` 读取；不写则默认当前目录）：
+
+```env
+QF_ROOT=/data/img
+```
+
 ```bash
-QF_ROOT=/data/img docker-compose up -d   # 指定主文件夹；不设置默认当前目录
-docker-compose up -d --build              # 默认本地构建（build: .）
+docker-compose up -d --build        # 默认本地构建（build: .）
+docker-compose down                 # 停止
+docker-compose logs -f              # 看日志
 ```
 
 改为拉取镜像：把 `docker-compose.yml` 里的 `build: .` 换成 `image: ghcr.io/sseven01/qingfeng-image-host:master`。
-常用命令：`docker-compose down`、`docker-compose logs -f`。
 
 上线后配合 Nginx 反向代理 + HTTPS（见下文），并设置 `TRUST_PROXY=true`、`COOKIE_SECURE=true`。
 
@@ -113,7 +119,7 @@ APP_PASSWORD=                  # 后台密码（不设则用 CLI 配置）
 SESSION_SECRET=                # 不设则首次启动自动生成
 BASE_URL=                      # 图片直链前缀（不设则在后台设置）
 MAX_FILE_SIZE_MB=              # 不设则 10，后台可改（重启生效）
-UPLOAD_DIR=uploads
+UPLOAD_DIR=uploads             # 一般无需设置：挂载主文件夹时三个子目录自动推导
 DATA_DIR=data
 THUMB_DIR=thumbs
 TRUST_PROXY=false              # 仅环境变量
