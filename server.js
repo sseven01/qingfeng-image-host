@@ -19,6 +19,8 @@ const port = Number(process.env.PORT || 3000);
 const maxFileSizeMb = Number(process.env.MAX_FILE_SIZE_MB || 10);
 const appPassword = process.env.APP_PASSWORD || "change-this-password";
 const baseUrl = (process.env.BASE_URL || `http://localhost:${port}`).replace(/\/+$/, "");
+const apiToken = process.env.API_TOKEN || "";
+const apiTokenWrite = process.env.API_TOKEN_WRITE || "";
 const allowedExts = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg"]);
 const allowedMimes = new Set([
   "image/jpeg",
@@ -87,6 +89,30 @@ function safeCompare(a, b) {
 function requireAuth(req, res, next) {
   if (req.session && req.session.authed) return next();
   return res.status(401).json({ error: "请先登录" });
+}
+
+function extractToken(req) {
+  const header = req.headers.authorization || "";
+  if (header.startsWith("Bearer ")) return header.slice(7).trim();
+  const alt = req.headers["x-api-token"];
+  return alt ? String(alt).trim() : "";
+}
+
+function tokenMatches(token, expected) {
+  if (!token || !expected) return false;
+  return safeCompare(token, expected);
+}
+
+function requireAuthOrToken(req, res, next) {
+  if (req.session && req.session.authed) return next();
+  if (tokenMatches(extractToken(req), apiToken)) return next();
+  return res.status(401).json({ error: "请先登录或提供有效 Token" });
+}
+
+function requireAuthOrWriteToken(req, res, next) {
+  if (req.session && req.session.authed) return next();
+  if (tokenMatches(extractToken(req), apiTokenWrite)) return next();
+  return res.status(401).json({ error: "请先登录或提供有效写入 Token" });
 }
 
 function normalizeFolder(input = "/") {
@@ -238,7 +264,7 @@ app.get("/api/me", (req, res) => {
   res.json({ authed: Boolean(req.session && req.session.authed) });
 });
 
-app.get("/api/tree", requireAuth, async (req, res, next) => {
+app.get("/api/tree", requireAuthOrToken, async (req, res, next) => {
   try {
     await ensureBaseDirs();
     const meta = await readMeta();
@@ -249,7 +275,7 @@ app.get("/api/tree", requireAuth, async (req, res, next) => {
   }
 });
 
-app.get("/api/items", requireAuth, async (req, res, next) => {
+app.get("/api/items", requireAuthOrToken, async (req, res, next) => {
   try {
     const folder = normalizeFolder(req.query.path || "/");
     await fsp.mkdir(folderToDisk(folder), { recursive: true });
@@ -269,7 +295,7 @@ app.get("/api/items", requireAuth, async (req, res, next) => {
   }
 });
 
-app.get("/api/images/search", requireAuth, async (req, res, next) => {
+app.get("/api/images/search", requireAuthOrToken, async (req, res, next) => {
   try {
     const query = String(req.query.q || "").trim().toLowerCase();
     if (!query) return res.json({ images: [] });
@@ -315,7 +341,7 @@ app.delete("/api/folders", requireAuth, async (req, res, next) => {
   }
 });
 
-app.post("/api/upload", requireAuth, upload.array("images", 50), async (req, res, next) => {
+app.post("/api/upload", requireAuthOrWriteToken, upload.array("images", 50), async (req, res, next) => {
   try {
     const folder = normalizeFolder(req.body.path || "/");
     await fsp.mkdir(folderToDisk(folder), { recursive: true });

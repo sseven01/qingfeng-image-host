@@ -19,3 +19,5 @@ services:
       - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-10}
       - TRUST_PROXY=${TRUST_PROXY:-false}
       - COOKIE_SECURE=${COOKIE_SECURE:-false}
+      - API_TOKEN=${API_TOKEN:-}
+      - API_TOKEN_WRITE=${API_TOKEN_WRITE:-}

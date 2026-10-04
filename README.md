@@ -53,7 +53,12 @@ DATA_DIR=data
 THUMB_DIR=thumbs
 TRUST_PROXY=false
 COOKIE_SECURE=false
+API_TOKEN=
+API_TOKEN_WRITE=
 ```
+
+- `API_TOKEN`：只读 Token，开放 `/api/tree`、`/api/items`、`/api/images/search` 给主题、AI 工具等程序化调用（可选，不配则这些接口仍仅限后台会话）。
+- `API_TOKEN_WRITE`：读写 Token，额外开放 `/api/upload`。与 `API_TOKEN` 分开配置，建议不上传就不要设置它。
 
 生产环境建议：
 
@@ -255,3 +260,58 @@ https://img.example.com/i/blog/cover.png
 ```
 
 图片直链不需要登录，后台管理接口需要登录。
+
+## API 调用（主题联动 / AI 写文章）
+
+除后台密码会话外，接口支持 Token 鉴权，供青枫主题选图面板、外部 AI 工具、MiMo 等程序化调用。
+
+### 鉴权
+
+在 `.env` 配置 `API_TOKEN`（只读）和 `API_TOKEN_WRITE`（上传，可选），请求头带：
+
+```text
+Authorization: Bearer <token>
+```
+
+也接受 `X-Api-Token: <token>`。Token 只授予对应接口的访问权，不会登录后台；后台会话与 Token 互不影响。
+
+### 接口一览
+
+| 方法 | 路径 | 权限 | 说明 |
+|---|---|---|---|
+| GET | `/api/tree?path=/` | 会话或只读 Token | 目录树（含递归图片数） |
+| GET | `/api/items?path=/blog` | 会话或只读 Token | 指定目录的子目录和图片（含直链 `url`） |
+| GET | `/api/images/search?q=封面` | 会话或只读 Token | 按文件名/路径搜索，最多 200 条 |
+| POST | `/api/upload` | 会话或写入 Token | multipart 上传，字段名 `images`，`path` 指定目标目录 |
+| GET | `/i/路径/文件.png` | 公开 | 图片直链，无鉴权 |
+
+目录、文件名请求参数均为 `/` 开头的绝对路径，如 `/blog/2026`。
+
+### curl 示例
+
+```bash
+# 列目录
+curl -H "Authorization: Bearer $API_TOKEN" "https://img.example.com/api/items?path=/blog"
+
+# 搜图
+curl -H "Authorization: Bearer $API_TOKEN" "https://img.example.com/api/images/search?q=封面"
+
+# 上传（需要 API_TOKEN_WRITE）
+curl -H "Authorization: Bearer $API_TOKEN_WRITE" -F "images=@cover.png" -F "path=/blog" \
+  "https://img.example.com/api/upload"
+```
+
+### 给 AI 工具的调用说明
+
+外部 AI 工具通过 WordPress REST API 发布文章时，把下面这段连同 Token 一起提供给它，它就能自动从图床取图配图：
+
+```text
+图床 API：
+- 基地址：https://img.example.com（按实际 BASE_URL）
+- 鉴权：请求头 Authorization: Bearer <你的只读Token>
+- 列目录：GET /api/items?path=/目录（返回 folders 和 images，images[].url 即图片直链）
+- 搜图：GET /api/images/search?q=关键词
+- 配图方式：把 images[].url 以 <img src="直链"> 写入文章 content，直链公开可访问、永久不变
+- 需要上传新图时：POST /api/upload（-F images=@文件 -F path=/目录），用写入 Token
+发布文章：POST <WP地址>/wp-json/wp/v2/posts（应用密码 Basic 认证），content 里包含 <img> 标签即可。
+```
