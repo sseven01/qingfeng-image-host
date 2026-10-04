@@ -26,60 +26,75 @@
 
 ```bash
 npm install
-cp .env.example .env
 npm start
 ```
 
-Windows PowerShell:
+另开一个终端设置后台密码（首次必做）：
 
-```powershell
-npm install
-Copy-Item .env.example .env
-npm start
+```bash
+node cli.js password
 ```
 
-打开 `http://localhost:3000`，使用 `.env` 里的 `APP_PASSWORD` 登录。
+打开 `http://localhost:3000` 登录，图床地址等普通设置在后台「设置」里填。
 
 ## 配置
 
+配置优先级：**环境变量（可选） > `data/config.json` > 默认值**。推荐用 CLI 和后台设置管理，不写任何 `.env` 也能跑；环境变量只在需要固定部署参数（端口、代理）时使用。
+
+### 推荐配置方式
+
+| 信息 | 在哪里配 | 命令 / 入口 |
+|---|---|---|
+| 后台登录密码 | 终端 CLI | `node cli.js password` |
+| 只读 / 读写 Token | 终端 CLI | `node cli.js token`（`--write` 为读写） |
+| 图床地址 BASE_URL、上传大小 | 后台「设置」 | 侧栏 → 设置 |
+| SESSION_SECRET | 无需配置 | 首次启动自动生成并保存 |
+| 查看全部配置状态 | 终端 CLI | `node cli.js status` |
+
+Docker 部署时命令形如：`docker exec -it qingfeng-image-host node cli.js password`。
+
+敏感信息（密码、Token）只在终端设置、只存配置文件，**网页后台不展示明文**；存在同名环境变量时 CLI 会拒绝写入（环境变量优先，写了也不生效）。
+
+### 环境变量（全部可选）
+
 ```env
-PORT=3000
-APP_PASSWORD=change-this-password
-SESSION_SECRET=change-this-random-secret
-BASE_URL=https://img.example.com
-MAX_FILE_SIZE_MB=10
+PORT=3000                      # 监听端口（仅环境变量）
+APP_PASSWORD=                  # 后台密码（不设则用 CLI 配置）
+SESSION_SECRET=                # 不设则首次启动自动生成
+BASE_URL=                      # 图片直链前缀（不设则在后台设置）
+MAX_FILE_SIZE_MB=              # 不设则 10，后台可改（重启生效）
 UPLOAD_DIR=uploads
 DATA_DIR=data
 THUMB_DIR=thumbs
-TRUST_PROXY=false
-COOKIE_SECURE=false
-API_TOKEN=
-API_TOKEN_WRITE=
+TRUST_PROXY=false              # 仅环境变量
+COOKIE_SECURE=false            # 仅环境变量
+API_TOKEN=                     # 只读 Token（不设则用 CLI 生成）
+API_TOKEN_WRITE=               # 读写 Token（不设则用 CLI 生成）
 ```
 
-- `API_TOKEN`：只读 Token，开放 `/api/tree`、`/api/items`、`/api/images/search` 给主题、AI 工具等程序化调用（可选，不配则这些接口仍仅限后台会话）。
-- `API_TOKEN_WRITE`：读写 Token，额外开放 `/api/upload`。与 `API_TOKEN` 分开配置，建议不上传就不要设置它。
+- `API_TOKEN`：只读 Token，开放 `/api/tree`、`/api/items`、`/api/images/search` 给主题、AI 工具等程序化调用。
+- `API_TOKEN_WRITE`：读写 Token，额外开放 `/api/upload`。与只读 Token 分开，建议不上传就不要生成。
 
 生产环境建议：
 
-- `APP_PASSWORD` 改成强密码
-- `SESSION_SECRET` 改成随机长字符串
-- `BASE_URL` 改成你的图床域名
-- 如果通过反向代理启用 HTTPS，可设置 `TRUST_PROXY=true` 和 `COOKIE_SECURE=true`
+- 密码和 Token 用 CLI 生成随机强值，不要沿用示例
+- `BASE_URL` 在后台设置成你的图床域名
+- 如果通过反向代理启用 HTTPS，设置 `TRUST_PROXY=true` 和 `COOKIE_SECURE=true`
 
 ## 目录说明
 
 ```text
 private-image-host/
-  data/           # 元数据 meta.json
+  data/           # 元数据 meta.json、配置 config.json
   uploads/        # 图片文件
   thumbs/         # 缩略图文件
   tmp/            # 上传临时文件（启动自动清理）
   public/         # 前端页面
   server.js       # 服务端
+  cli.js          # 命令行配置工具
 ```
 
-备份时重点备份 `uploads/`、`thumbs/` 和 `data/meta.json`。
+备份时重点备份 `uploads/`、`thumbs/`、`data/meta.json` 和 `data/config.json`（密码与 Token 在 config.json 里）。
 
 ## Docker 部署（推荐）
 
@@ -96,10 +111,9 @@ ghcr.io/sseven01/qingfeng-image-host
 | `master` | 每次 push 到 master 分支自动构建，**日常部署用这个** |
 | `vX.Y.Z` | 打 `v*` 版本标签时构建，用于固定版本回滚 |
 
-### 方式一：docker run 直接部署
+### 方式一：docker run 直接部署（无需 .env）
 
-1. 准备 `.env`（参考上方「配置」一节，含密码、`BASE_URL`、`API_TOKEN` 等）。
-2. 拉取并启动：
+1. 拉取并启动（只挂数据卷，不用准备任何配置文件）：
 
 ```bash
 docker pull ghcr.io/sseven01/qingfeng-image-host:master
@@ -108,11 +122,25 @@ docker run -d \
   --name qingfeng-image-host \
   --restart unless-stopped \
   -p 3000:3000 \
-  --env-file .env \
   -v "$PWD/uploads:/app/uploads" \
   -v "$PWD/data:/app/data" \
   -v "$PWD/thumbs:/app/thumbs" \
   ghcr.io/sseven01/qingfeng-image-host:master
+```
+
+2. 设置后台密码（终端交互输入，立即生效）：
+
+```bash
+docker exec -it qingfeng-image-host node cli.js password
+```
+
+3. 打开 `http://服务器IP:3000` 登录，进侧栏「设置」填图床地址（`BASE_URL`），保存。
+
+4. 需要给主题/插件/AI 用时，生成 Token（终端显示，可直接复制）：
+
+```bash
+docker exec -it qingfeng-image-host node cli.js token          # 只读
+docker exec -it qingfeng-image-host node cli.js token --write  # 读写（上传）
 ```
 
 如果镜像包是私有的，先登录（PAT 需要 `read:packages` 权限；公开包可跳过）：
@@ -120,6 +148,8 @@ docker run -d \
 ```bash
 echo <PAT> | docker login ghcr.io -u <GitHub用户名> --password-stdin
 ```
+
+旧版本用 `.env` 部署的也不受影响：环境变量继续优先，与新方式二选一即可。
 
 ### 方式二：docker-compose 部署
 

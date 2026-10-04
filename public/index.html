@@ -16,6 +16,7 @@
         <input id="passwordInput" type="password" placeholder="访问密码" autocomplete="current-password" required />
         <button type="submit">进入后台</button>
         <p id="loginError" class="error"></p>
+        <p id="setupHint" class="setup-hint hidden"></p>
       </form>
     </main>
 
@@ -23,7 +24,10 @@
       <aside class="sidebar">
         <div class="brand">
           <strong>青枫图床</strong>
-          <button id="logoutBtn" title="退出登录">退出</button>
+          <div class="brand-actions">
+            <button id="settingsBtn" title="系统设置">设置</button>
+            <button id="logoutBtn" title="退出登录">退出</button>
+          </div>
         </div>
         <div class="tree-search">
           <input id="folderSearchInput" type="search" placeholder="搜索目录名称" autocomplete="off" />
@@ -130,6 +134,28 @@
         <div class="dialog-actions">
           <button id="cancelDeleteFolderBtn" type="button">取消</button>
           <button id="confirmDeleteFolderBtn" class="danger-btn" type="button">确认删除</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="settingsDialog" class="dialog-backdrop hidden">
+      <div class="dialog">
+        <p class="eyebrow">系统设置</p>
+        <h2>设置</h2>
+        <label class="settings-field">
+          图床对外地址（BASE_URL，用于生成图片直链）
+          <input id="baseUrlInput" type="url" placeholder="https://img.example.com" autocomplete="off" />
+        </label>
+        <label class="settings-field">
+          最大上传大小（MB，修改后需重启容器生效）
+          <input id="maxFileSizeInput" type="number" min="1" max="512" />
+        </label>
+        <p id="tokenStatus" class="settings-hint"></p>
+        <p class="settings-hint">密码与 Token 不在网页上设置或展示，请在容器终端执行 <code>node cli.js password</code> / <code>node cli.js token</code>。</p>
+        <p id="settingsError" class="error"></p>
+        <div class="dialog-actions">
+          <button id="cancelSettingsBtn" type="button">取消</button>
+          <button id="saveSettingsBtn" type="button">保存</button>
         </div>
       </div>
     </div>

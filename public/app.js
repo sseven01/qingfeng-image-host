@@ -32,6 +32,15 @@ const deleteFolderDialog = $("#deleteFolderDialog");
 const deleteFolderMessage = $("#deleteFolderMessage");
 const cancelDeleteFolderBtn = $("#cancelDeleteFolderBtn");
 const confirmDeleteFolderBtn = $("#confirmDeleteFolderBtn");
+const setupHint = $("#setupHint");
+const settingsBtn = $("#settingsBtn");
+const settingsDialog = $("#settingsDialog");
+const baseUrlInput = $("#baseUrlInput");
+const maxFileSizeInput = $("#maxFileSizeInput");
+const tokenStatus = $("#tokenStatus");
+const settingsError = $("#settingsError");
+const cancelSettingsBtn = $("#cancelSettingsBtn");
+const saveSettingsBtn = $("#saveSettingsBtn");
 const toast = $("#toast");
 const uploadProgressPanel = $("#uploadProgressPanel");
 const uploadProgressSummary = $("#uploadProgressSummary");
@@ -585,6 +594,7 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     closeFolderContextMenu();
     closeDeleteFolderDialog();
+    closeSettingsDialog();
   }
 });
 
@@ -647,6 +657,51 @@ dropZone.addEventListener("drop", async (event) => {
   }
 });
 
+function closeSettingsDialog() {
+  settingsDialog.classList.add("hidden");
+  settingsError.textContent = "";
+}
+
+async function openSettingsDialog() {
+  settingsError.textContent = "";
+  try {
+    const data = await api("/api/settings");
+    baseUrlInput.value = data.baseUrl || "";
+    maxFileSizeInput.value = data.maxFileSizeMb || 10;
+    const readState = data.tokens.read ? "已配置" : "未配置";
+    const writeState = data.tokens.write ? "已配置" : "未配置";
+    const envNote = data.sources.baseUrl === "env" ? "（当前由环境变量控制，此处修改不生效）" : "";
+    tokenStatus.textContent = `只读 Token：${readState}　读写 Token：${writeState}${envNote}`;
+    settingsDialog.classList.remove("hidden");
+  } catch (error) {
+    showToast(error.message, "error");
+  }
+}
+
+settingsBtn.addEventListener("click", openSettingsDialog);
+cancelSettingsBtn.addEventListener("click", closeSettingsDialog);
+
+saveSettingsBtn.addEventListener("click", async () => {
+  settingsError.textContent = "";
+  try {
+    const data = await api("/api/settings", {
+      method: "POST",
+      body: JSON.stringify({
+        baseUrl: baseUrlInput.value.trim(),
+        maxFileSizeMb: Number(maxFileSizeInput.value)
+      })
+    });
+    closeSettingsDialog();
+    if (data.restartRequired) {
+      showToast("已保存；最大上传大小需重启容器后生效", "success");
+    } else {
+      showToast("设置已保存", "success");
+    }
+  } catch (error) {
+    settingsError.textContent = error.message;
+  }
+});
+
 (async function boot() {
   const me = await api("/api/me");
   if (me.authed) {
@@ -654,5 +709,12 @@ dropZone.addEventListener("drop", async (event) => {
     await loadAll();
   } else {
     showLogin();
+    if (me.passwordConfigured === false) {
+      setupHint.textContent =
+        "尚未设置访问密码，请在服务器上执行：docker exec -it qingfeng-image-host node cli.js password";
+      setupHint.classList.remove("hidden");
+    } else {
+      setupHint.classList.add("hidden");
+    }
   }
 })();

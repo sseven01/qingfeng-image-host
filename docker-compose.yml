@@ -13,10 +13,11 @@ services:
       - ./thumbs:/app/thumbs
     environment:
       - PORT=3000
-      - APP_PASSWORD=${APP_PASSWORD:-change-this-password}
-      - SESSION_SECRET=${SESSION_SECRET:-change-this-random-secret}
-      - BASE_URL=${BASE_URL:-http://localhost:3000}
-      - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-10}
+      # 以下全部可选：留空即由 CLI / 后台设置写入 data/config.json（环境变量优先）
+      - APP_PASSWORD=${APP_PASSWORD:-}
+      - SESSION_SECRET=${SESSION_SECRET:-}
+      - BASE_URL=${BASE_URL:-}
+      - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-}
       - TRUST_PROXY=${TRUST_PROXY:-false}
       - COOKIE_SECURE=${COOKIE_SECURE:-false}
       - API_TOKEN=${API_TOKEN:-}

@@ -9,6 +9,15 @@ const express = require("express");
 const session = require("express-session");
 const multer = require("multer");
 const { imageSize } = require("image-size");
+const {
+  configPath,
+  readConfig,
+  saveConfig,
+  resolveValue,
+  hasValue,
+  valueSource,
+  ensureSessionSecret
+} = require("./config");
 
 const app = express();
 const rootDir = __dirname;
@@ -16,11 +25,9 @@ const uploadRoot = path.resolve(rootDir, process.env.UPLOAD_DIR || "uploads");
 const dataRoot = path.resolve(rootDir, process.env.DATA_DIR || "data");
 const metaPath = path.join(dataRoot, "meta.json");
 const port = Number(process.env.PORT || 3000);
-const maxFileSizeMb = Number(process.env.MAX_FILE_SIZE_MB || 10);
-const appPassword = process.env.APP_PASSWORD || "change-this-password";
-const baseUrl = (process.env.BASE_URL || `http://localhost:${port}`).replace(/\/+$/, "");
-const apiToken = process.env.API_TOKEN || "";
-const apiTokenWrite = process.env.API_TOKEN_WRITE || "";
+// 敏感项与普通配置均为「环境变量（可选） > data/config.json > 默认值」
+// 上传大小在启动时读取一次（multer 限制），后台修改需重启生效
+const maxFileSizeMb = Number(resolveValue("MAX_FILE_SIZE_MB", "maxFileSizeMb", 10));
 const allowedExts = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg"]);
 const allowedMimes = new Set([
   "image/jpeg",
@@ -43,7 +50,7 @@ app.use(express.json({ limit: "1mb" }));
 app.use(
   session({
     name: "pih.sid",
-    secret: process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex"),
+    secret: ensureSessionSecret(),
     resave: false,
     saveUninitialized: false,
     cookie: {
@@ -105,13 +112,13 @@ function tokenMatches(token, expected) {
 
 function requireAuthOrToken(req, res, next) {
   if (req.session && req.session.authed) return next();
-  if (tokenMatches(extractToken(req), apiToken)) return next();
+  if (tokenMatches(extractToken(req), resolveValue("API_TOKEN", "apiToken", ""))) return next();
   return res.status(401).json({ error: "请先登录或提供有效 Token" });
 }
 
 function requireAuthOrWriteToken(req, res, next) {
   if (req.session && req.session.authed) return next();
-  if (tokenMatches(extractToken(req), apiTokenWrite)) return next();
+  if (tokenMatches(extractToken(req), resolveValue("API_TOKEN_WRITE", "apiTokenWrite", ""))) return next();
   return res.status(401).json({ error: "请先登录或提供有效写入 Token" });
 }
 
@@ -172,8 +179,12 @@ function buildFolderPath(parent, input) {
   return normalizeFolder(path.posix.join(isAbsolute ? "/" : normalizeFolder(parent || "/"), ...parts));
 }
 
+function currentBaseUrl() {
+  return String(resolveValue("BASE_URL", "baseUrl", `http://localhost:${port}`)).replace(/\/+$/, "");
+}
+
 function publicUrl(publicPath) {
-  return `${baseUrl}/i${encodeURI(publicPath).replace(/%2F/g, "/")}`;
+  return `${currentBaseUrl()}/i${encodeURI(publicPath).replace(/%2F/g, "/")}`;
 }
 
 function withImageUrl(image) {
@@ -249,6 +260,7 @@ app.get("/", (req, res) => {
 
 app.post("/api/login", (req, res) => {
   const password = req.body && req.body.password;
+  const appPassword = resolveValue("APP_PASSWORD", "appPassword", "change-this-password");
   if (!safeCompare(password || "", appPassword)) {
     return res.status(401).json({ error: "访问密码错误" });
   }
@@ -261,7 +273,62 @@ app.post("/api/logout", requireAuth, (req, res) => {
 });
 
 app.get("/api/me", (req, res) => {
-  res.json({ authed: Boolean(req.session && req.session.authed) });
+  res.json({
+    authed: Boolean(req.session && req.session.authed),
+    passwordConfigured: hasValue("APP_PASSWORD", "appPassword")
+  });
+});
+
+app.get("/api/settings", requireAuth, (req, res) => {
+  res.json({
+    baseUrl: resolveValue("BASE_URL", "baseUrl", `http://localhost:${port}`),
+    maxFileSizeMb: Number(resolveValue("MAX_FILE_SIZE_MB", "maxFileSizeMb", 10)),
+    tokens: {
+      read: hasValue("API_TOKEN", "apiToken"),
+      write: hasValue("API_TOKEN_WRITE", "apiTokenWrite")
+    },
+    sources: {
+      baseUrl: valueSource("BASE_URL", "baseUrl"),
+      maxFileSizeMb: valueSource("MAX_FILE_SIZE_MB", "maxFileSizeMb")
+    },
+    configPath
+  });
+});
+
+app.post("/api/settings", requireAuth, (req, res) => {
+  const body = req.body || {};
+  const patch = {};
+  let restartRequired = false;
+
+  if (body.baseUrl !== undefined) {
+    const value = String(body.baseUrl || "").trim().replace(/\/+$/, "");
+    if (value && !/^https?:\/\//i.test(value)) {
+      return res.status(400).json({ error: "图床地址必须以 http:// 或 https:// 开头" });
+    }
+    if (value) patch.baseUrl = value;
+  }
+
+  if (body.maxFileSizeMb !== undefined) {
+    const value = Number(body.maxFileSizeMb);
+    if (!Number.isFinite(value) || value < 1 || value > 512) {
+      return res.status(400).json({ error: "最大上传大小需在 1~512 MB 之间" });
+    }
+    patch.maxFileSizeMb = String(Math.floor(value));
+    restartRequired = true;
+  }
+
+  if (Object.keys(patch).length) saveConfig(patch);
+
+  res.json({
+    ok: true,
+    restartRequired,
+    baseUrl: resolveValue("BASE_URL", "baseUrl", `http://localhost:${port}`),
+    maxFileSizeMb: Number(resolveValue("MAX_FILE_SIZE_MB", "maxFileSizeMb", 10)),
+    sources: {
+      baseUrl: valueSource("BASE_URL", "baseUrl"),
+      maxFileSizeMb: valueSource("MAX_FILE_SIZE_MB", "maxFileSizeMb")
+    }
+  });
 });
 
 app.get("/api/tree", requireAuthOrToken, async (req, res, next) => {
