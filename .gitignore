@@ -8,3 +8,4 @@ tmp/
 lazygit.exe
 *.tmp
 npm-debug.log*
+.quarkclouddrive/
