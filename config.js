@@ -2,7 +2,27 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 
-const dataRoot = path.resolve(__dirname, process.env.DATA_DIR || "data");
+const appRoot = __dirname;
+
+/**
+ * 单目录部署自动识别：
+ * 只要容器内挂载了 /app/storage（docker run -v 主目录:/app/storage），
+ * 三个数据子目录自动落在 <主目录>/uploads、data、thumbs 下；
+ * 未挂载则保持旧布局（/app/uploads 等），与现有部署完全兼容。
+ * UPLOAD_DIR / DATA_DIR / THUMB_DIR 环境变量仍为最高优先级。
+ */
+function storagePrefix() {
+  return fs.existsSync(path.join(appRoot, "storage")) ? "storage" : "";
+}
+
+function resolveStorageDir(envName, legacyName) {
+  const explicit = process.env[envName];
+  if (explicit) return path.resolve(appRoot, explicit);
+  const prefix = storagePrefix();
+  return path.resolve(appRoot, prefix ? `${prefix}/${legacyName}` : legacyName);
+}
+
+const dataRoot = resolveStorageDir("DATA_DIR", "data");
 const configPath = path.join(dataRoot, "config.json");
 
 let cache = null;
@@ -84,4 +104,4 @@ function ensureSessionSecret() {
   return generated;
 }
 
-module.exports = { configPath, readConfig, saveConfig, resolveValue, hasValue, valueSource, ensureSessionSecret };
+module.exports = { configPath, readConfig, saveConfig, resolveValue, hasValue, valueSource, ensureSessionSecret, resolveStorageDir };

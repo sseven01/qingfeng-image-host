@@ -16,13 +16,16 @@ const {
   resolveValue,
   hasValue,
   valueSource,
-  ensureSessionSecret
+  ensureSessionSecret,
+  resolveStorageDir
 } = require("./config");
 
 const app = express();
 const rootDir = __dirname;
-const uploadRoot = path.resolve(rootDir, process.env.UPLOAD_DIR || "uploads");
-const dataRoot = path.resolve(rootDir, process.env.DATA_DIR || "data");
+// 挂载 /app/storage 时自动使用 storage/uploads、storage/data、storage/thumbs
+const uploadRoot = resolveStorageDir("UPLOAD_DIR", "uploads");
+const dataRoot = resolveStorageDir("DATA_DIR", "data");
+const thumbRoot = resolveStorageDir("THUMB_DIR", "thumbs");
 const metaPath = path.join(dataRoot, "meta.json");
 const port = Number(process.env.PORT || 3000);
 // 敏感项与普通配置均为「环境变量（可选） > data/config.json > 默认值」
@@ -66,6 +69,7 @@ app.use(express.static(path.join(rootDir, "public")));
 async function ensureBaseDirs() {
   await fsp.mkdir(uploadRoot, { recursive: true });
   await fsp.mkdir(dataRoot, { recursive: true });
+  await fsp.mkdir(thumbRoot, { recursive: true });
   try {
     await fsp.access(metaPath);
   } catch {

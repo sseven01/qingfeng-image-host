@@ -8,12 +8,10 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      # 总路径由 QF_ROOT 指定（.env 或环境变量），三个子目录自动拼接：
-      #   QF_ROOT=/data/img  →  /data/img/uploads、/data/img/data、/data/img/thumbs
-      # 不设置时默认当前目录（./uploads、./data、./thumbs）
-      - ${QF_ROOT:-.}/uploads:/app/uploads
-      - ${QF_ROOT:-.}/data:/app/data
-      - ${QF_ROOT:-.}/thumbs:/app/thumbs
+      # 只挂一个主文件夹，程序自动在其中使用三个子目录：
+      #   uploads、data、thumbs（检测到 /app/storage 挂载点即启用）
+      # 主文件夹由 QF_ROOT 指定（.env 或环境变量），默认当前目录
+      - ${QF_ROOT:-.}:/app/storage
     environment:
       - PORT=3000
       # 以下全部可选：留空即由 CLI / 后台设置写入 data/config.json（环境变量优先）

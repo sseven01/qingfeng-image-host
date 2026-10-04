@@ -84,17 +84,19 @@ API_TOKEN_WRITE=               # 读写 Token（不设则用 CLI 生成）
 ## 目录说明
 
 ```text
-private-image-host/
-  data/           # 元数据 meta.json、配置 config.json
-  uploads/        # 图片文件
-  thumbs/         # 缩略图文件
-  tmp/            # 上传临时文件（启动自动清理）
-  public/         # 前端页面
-  server.js       # 服务端
-  cli.js          # 命令行配置工具
+<主文件夹>/           # 部署时选定，docker run -v 主文件夹:/app/storage
+  uploads/            # 图片文件
+  data/               # 元数据 meta.json、配置 config.json
+  thumbs/             # 缩略图（预留）
+private-image-host/   # 程序目录（源码部署或不挂载时）
+  public/             # 前端页面
+  server.js           # 服务端
+  cli.js              # 命令行配置工具
 ```
 
-备份时重点备份 `uploads/`、`thumbs/`、`data/meta.json` 和 `data/config.json`（密码与 Token 在 config.json 里）。
+只挂载 `/app/storage` 时程序自动使用主文件夹下的三个子目录；不挂载则保持旧布局（程序目录下的 `uploads/`、`data/`）。`UPLOAD_DIR` 等环境变量可强制指定，优先级最高。
+
+备份时重点备份 `uploads/`、`thumbs/` 和 `data/`（密码与 Token 在 `data/config.json` 里）。
 
 ## Docker 部署（推荐）
 
@@ -113,22 +115,20 @@ ghcr.io/sseven01/qingfeng-image-host
 
 ### 方式一：docker run 直接部署（无需 .env）
 
-数据只挂一个总路径 `QF_ROOT`，`uploads`、`data`、`thumbs` 三个子目录自动在其下创建。按你的系统选对应命令：
+**部署时只选一个主文件夹**，程序会自动检测挂载点并在其中使用 `uploads`、`data`、`thumbs` 三个子目录（子目录自动创建）。按你的系统选对应命令：
 
 **Linux 服务器（Bash）**
 
 ```bash
 docker pull ghcr.io/sseven01/qingfeng-image-host:master
 
-QF_ROOT=/data/img   # 换成你的总路径
+QF_ROOT=/data/img   # 换成你的主文件夹
 
 # 首次部署：建目录并授权（容器内以 uid 1001 运行，否则上传会报权限错误）
 mkdir -p "$QF_ROOT" && chown -R 1001:1001 "$QF_ROOT"
 
 docker run -d --name qingfeng-image-host --restart unless-stopped -p 3000:3000 \
-  -v "$QF_ROOT/uploads:/app/uploads" \
-  -v "$QF_ROOT/data:/app/data" \
-  -v "$QF_ROOT/thumbs:/app/thumbs" \
+  -v "$QF_ROOT:/app/storage" \
   ghcr.io/sseven01/qingfeng-image-host:master
 ```
 
@@ -137,12 +137,10 @@ docker run -d --name qingfeng-image-host --restart unless-stopped -p 3000:3000 \
 ```bash
 docker pull ghcr.io/sseven01/qingfeng-image-host:master
 
-QF_ROOT=$HOME/qingfeng-img   # 换成你的总路径（需在 Docker Desktop 共享目录内）
+QF_ROOT=$HOME/qingfeng-img   # 换成你的主文件夹（需在 Docker Desktop 共享目录内）
 
 docker run -d --name qingfeng-image-host --restart unless-stopped -p 3000:3000 \
-  -v "$QF_ROOT/uploads:/app/uploads" \
-  -v "$QF_ROOT/data:/app/data" \
-  -v "$QF_ROOT/thumbs:/app/thumbs" \
+  -v "$QF_ROOT:/app/storage" \
   ghcr.io/sseven01/qingfeng-image-host:master
 ```
 
@@ -150,21 +148,26 @@ macOS 不需要 chown（Docker Desktop 自动处理文件权限）。
 
 **Windows（PowerShell + Docker Desktop）**
 
-注意：PowerShell 的换行符是反引号 `` ` ``，**不是** Bash 的 `\`，整段复制即可：
+只有一行挂载参数；PowerShell 换行符是反引号 `` ` ``（不是 Bash 的 `\`），整段复制即可：
 
 ```powershell
 docker pull ghcr.io/sseven01/qingfeng-image-host:master
 
-$QF_ROOT = "D:\qingfeng-img"   # 换成你的总路径
+$QF_ROOT = "D:\qingfeng-img"   # 换成你的主文件夹
 
-docker run -d --name qingfeng-image-host --restart unless-stopped -p 3000:3000 `
-  -v "${QF_ROOT}/uploads:/app/uploads" `
-  -v "${QF_ROOT}/data:/app/data" `
-  -v "${QF_ROOT}/thumbs:/app/thumbs" `
-  ghcr.io/sseven01/qingfeng-image-host:master
+docker run -d --name qingfeng-image-host --restart unless-stopped -p 3000:3000 -v "${QF_ROOT}:/app/storage" ghcr.io/sseven01/qingfeng-image-host:master
 ```
 
 Windows 也不需要 chown。
+
+部署后的目录结构（主文件夹内自动生成）：
+
+```text
+/data/img/            ← 主文件夹（部署时选定）
+  uploads/            ← 图片文件
+  data/               # meta.json、config.json
+  thumbs/             # 缩略图（预留）
+```
 
 **启动后（各系统相同）：**
 
@@ -193,13 +196,13 @@ echo <PAT> | docker login ghcr.io -u <GitHub用户名> --password-stdin
 
 ### 方式二：docker-compose 部署
 
-本仓库自带 `docker-compose.yml`。同样只需指定一个总路径 `QF_ROOT`，三个子目录自动挂载：
+本仓库自带 `docker-compose.yml`，同样**只挂一个主文件夹**，三个子目录由程序自动使用：
 
 ```bash
-# 在 .env（或环境变量）里加一行总路径即可，没有 .env 就直接：
+# 指定主文件夹（.env 里加 QF_ROOT=... 或环境变量传入）：
 QF_ROOT=/data/img docker-compose up -d
 
-# 不设置 QF_ROOT 时默认当前目录（./uploads、./data、./thumbs）
+# 不设置时默认当前目录（uploads、data、thumbs 在项目目录下）
 docker-compose up -d
 ```
 
@@ -213,8 +216,9 @@ Linux 首次部署同样先授权：`mkdir -p /data/img && chown -R 1001:1001 /d
 ### 更新版本
 
 ```bash
-docker pull ghcr.io/sseven01/qingfeng-image-host:master
-docker-compose up -d --force-recreate   # 或 docker rm -f 后重新 docker run
+docker pull ghcr.io/sseven01/qingfeng-image-host:master   # 拉取镜像部署时
+docker-compose up -d --build                               # compose 构建部署时
+# 或 docker rm -f 后重新 docker run
 ```
 
 数据在挂载卷里，重建容器不丢图片。上线后同样需要 Nginx 反向代理 + HTTPS（见下文）。
