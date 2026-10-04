@@ -113,12 +113,17 @@ ghcr.io/sseven01/qingfeng-image-host
 
 ### 方式一：docker run 直接部署（无需 .env）
 
-数据只挂一个总路径，`uploads`、`data`、`thumbs` 三个子目录自动在其下创建：
+数据只挂一个总路径 `QF_ROOT`，`uploads`、`data`、`thumbs` 三个子目录自动在其下创建。按你的系统选对应命令：
+
+**Linux 服务器（Bash）**
 
 ```bash
 docker pull ghcr.io/sseven01/qingfeng-image-host:master
 
 QF_ROOT=/data/img   # 换成你的总路径
+
+# 首次部署：建目录并授权（容器内以 uid 1001 运行，否则上传会报权限错误）
+mkdir -p "$QF_ROOT" && chown -R 1001:1001 "$QF_ROOT"
 
 docker run -d --name qingfeng-image-host --restart unless-stopped -p 3000:3000 \
   -v "$QF_ROOT/uploads:/app/uploads" \
@@ -127,13 +132,41 @@ docker run -d --name qingfeng-image-host --restart unless-stopped -p 3000:3000 \
   ghcr.io/sseven01/qingfeng-image-host:master
 ```
 
-Linux 首次部署先给目录授权（容器内以 uid 1001 运行，否则上传会报权限错误）：
+**macOS（Bash / Zsh）**
 
 ```bash
-mkdir -p "$QF_ROOT" && chown -R 1001:1001 "$QF_ROOT"
+docker pull ghcr.io/sseven01/qingfeng-image-host:master
+
+QF_ROOT=$HOME/qingfeng-img   # 换成你的总路径（需在 Docker Desktop 共享目录内）
+
+docker run -d --name qingfeng-image-host --restart unless-stopped -p 3000:3000 \
+  -v "$QF_ROOT/uploads:/app/uploads" \
+  -v "$QF_ROOT/data:/app/data" \
+  -v "$QF_ROOT/thumbs:/app/thumbs" \
+  ghcr.io/sseven01/qingfeng-image-host:master
 ```
 
-后续流程：
+macOS 不需要 chown（Docker Desktop 自动处理文件权限）。
+
+**Windows（PowerShell + Docker Desktop）**
+
+注意：PowerShell 的换行符是反引号 `` ` ``，**不是** Bash 的 `\`，整段复制即可：
+
+```powershell
+docker pull ghcr.io/sseven01/qingfeng-image-host:master
+
+$QF_ROOT = "D:\qingfeng-img"   # 换成你的总路径
+
+docker run -d --name qingfeng-image-host --restart unless-stopped -p 3000:3000 `
+  -v "${QF_ROOT}/uploads:/app/uploads" `
+  -v "${QF_ROOT}/data:/app/data" `
+  -v "${QF_ROOT}/thumbs:/app/thumbs" `
+  ghcr.io/sseven01/qingfeng-image-host:master
+```
+
+Windows 也不需要 chown。
+
+**启动后（各系统相同）：**
 
 1. 设置后台密码（终端交互输入，立即生效）：
 
