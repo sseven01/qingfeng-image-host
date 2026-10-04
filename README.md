@@ -113,30 +113,37 @@ ghcr.io/sseven01/qingfeng-image-host
 
 ### 方式一：docker run 直接部署（无需 .env）
 
-1. 拉取并启动（只挂数据卷，不用准备任何配置文件）：
+数据只挂一个总路径，`uploads`、`data`、`thumbs` 三个子目录自动在其下创建：
 
 ```bash
 docker pull ghcr.io/sseven01/qingfeng-image-host:master
 
-docker run -d \
-  --name qingfeng-image-host \
-  --restart unless-stopped \
-  -p 3000:3000 \
-  -v "$PWD/uploads:/app/uploads" \
-  -v "$PWD/data:/app/data" \
-  -v "$PWD/thumbs:/app/thumbs" \
+QF_ROOT=/data/img   # 换成你的总路径
+
+docker run -d --name qingfeng-image-host --restart unless-stopped -p 3000:3000 \
+  -v "$QF_ROOT/uploads:/app/uploads" \
+  -v "$QF_ROOT/data:/app/data" \
+  -v "$QF_ROOT/thumbs:/app/thumbs" \
   ghcr.io/sseven01/qingfeng-image-host:master
 ```
 
-2. 设置后台密码（终端交互输入，立即生效）：
+Linux 首次部署先给目录授权（容器内以 uid 1001 运行，否则上传会报权限错误）：
+
+```bash
+mkdir -p "$QF_ROOT" && chown -R 1001:1001 "$QF_ROOT"
+```
+
+后续流程：
+
+1. 设置后台密码（终端交互输入，立即生效）：
 
 ```bash
 docker exec -it qingfeng-image-host node cli.js password
 ```
 
-3. 打开 `http://服务器IP:3000` 登录，进侧栏「设置」填图床地址（`BASE_URL`），保存。
+2. 打开 `http://服务器IP:3000` 登录，进侧栏「设置」填图床地址（`BASE_URL`），保存。
 
-4. 需要给主题/插件/AI 用时，生成 Token（终端显示，可直接复制）：
+3. 需要给主题/插件/AI 用时，生成 Token（终端显示，可直接复制）：
 
 ```bash
 docker exec -it qingfeng-image-host node cli.js token          # 只读
@@ -153,17 +160,20 @@ echo <PAT> | docker login ghcr.io -u <GitHub用户名> --password-stdin
 
 ### 方式二：docker-compose 部署
 
-本仓库自带 `docker-compose.yml`（含端口映射、数据卷、环境变量透传）。两种用法：
+本仓库自带 `docker-compose.yml`。同样只需指定一个总路径 `QF_ROOT`，三个子目录自动挂载：
 
 ```bash
-# 本地构建运行（默认 build: .）
-docker-compose up -d
+# 在 .env（或环境变量）里加一行总路径即可，没有 .env 就直接：
+QF_ROOT=/data/img docker-compose up -d
 
-# 或改为拉取 GHCR 镜像：把 docker-compose.yml 里的 build: . 换成
-#   image: ghcr.io/sseven01/qingfeng-image-host:master
-# 然后
+# 不设置 QF_ROOT 时默认当前目录（./uploads、./data、./thumbs）
 docker-compose up -d
 ```
+
+默认 `build: .` 本地构建；想改为拉取 GHCR 镜像，把 `build: .` 换成
+`image: ghcr.io/sseven01/qingfeng-image-host:master`。
+
+Linux 首次部署同样先授权：`mkdir -p /data/img && chown -R 1001:1001 /data/img`。
 
 常用命令：`docker-compose up -d` 启动、`docker-compose down` 停止、`docker-compose logs -f` 看日志。
 
