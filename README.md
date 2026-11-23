@@ -10,92 +10,86 @@
 - 自动处理重名、网格预览、一键复制直链和 Markdown、删除/重命名
 - 列表分页加载，大数据量不卡顿；本地文件存储，无数据库依赖
 
-## 快速开始（Docker，推荐）
+## Docker 部署（Linux 服务器）
 
-镜像由 GitHub Actions 自动构建发布到 GHCR，服务器无需源码：
+在装有 Docker 的服务器上执行以下步骤。直接拉取镜像时，服务器无需克隆源码。已有图床要恢复或更新时，先用 `docker ps -a` 查看容器，确认原来的端口和数据挂载目录。
 
-```text
-ghcr.io/sseven01/qingfeng-image-host
-```
+### 方式一：直接拉取镜像
 
-| 标签 | 说明 |
-|---|---|
-| `master` | 每次 push master 自动构建，**日常用这个** |
-| `vX.Y.Z` | 版本标签，用于固定版本回滚 |
+示例使用容器名 `qingfeng-image-host`、宿主机端口 `3010` 和数据目录 `/data/qingfeng-image-host`。如果这些已被另一套图床使用，请为新实例改用独立的名称、空闲端口和数据目录。端口映射 `3010:3000` 左边是服务器端口，右边是容器内端口。
 
-### 1. 启动
-
-**部署时只选一个主文件夹**：程序检测到挂载后自动在其中使用 `uploads`、`data`、`thumbs` 三个子目录（自动创建），不需要任何配置文件。
-
-**Linux 服务器（Bash）：**
+#### 带注释版
 
 ```bash
+# 1. 首次部署时创建数据目录，并授权给容器用户（UID 1001）
+sudo install -d -m 0755 -o 1001 -g 1001 /data/qingfeng-image-host
+
+# 2. 从 GitHub Container Registry 拉取镜像
 docker pull ghcr.io/sseven01/qingfeng-image-host:master
 
-# 仅首次：创建主文件夹并授权（容器 uid 1001；路径换成你自己的）
-mkdir -p /data/img && chown -R 1001:1001 /data/img
-
-docker run -d --name qingfeng-image-host --restart unless-stopped -p 3000:3000 \
-  -v /data/img:/app/storage \
+# 3. 后台启动容器，将服务器的 3010 端口映射到容器的 3000 端口
+docker run -d --name qingfeng-image-host --restart unless-stopped \
+  -p 3010:3000 \
+  -v /data/qingfeng-image-host:/app/storage \
   ghcr.io/sseven01/qingfeng-image-host:master
 ```
 
-**macOS / Windows（Docker Desktop）差异：**
-
-| 系统 | 把路径换成 | chown | 注意 |
-|---|---|---|---|
-| macOS | `/Users/你的用户名/qingfeng-img` | 不需要 | 路径需在 Docker Desktop 共享目录内 |
-| Windows PowerShell | `D:\qingfeng-img` | 不需要 | 命令写成单行；PS 换行符是反引号 `` ` ``，不是 `\` |
-
-```powershell
-# Windows 单行完整命令
-docker run -d --name qingfeng-image-host --restart unless-stopped -p 3000:3000 -v "D:\qingfeng-img:/app/storage" ghcr.io/sseven01/qingfeng-image-host:master
-```
-
-镜像为私有时先登录（公开包跳过）：
-
 ```bash
-echo <PAT> | docker login ghcr.io -u <GitHub用户名> --password-stdin   # PAT 需 read:packages
-```
-
-### 2. 初始化（各系统相同）
-
-```bash
-# ① 设置后台密码（交互输入，立即生效）
+# 4. 单独执行此命令，按提示输入后台密码并再次确认
 docker exec -it qingfeng-image-host node cli.js password
-
-# ② 浏览器打开 http://服务器IP:3000 登录 → 侧栏「设置」→ 填图床地址 BASE_URL → 保存
-
-# ③ 给主题 / 插件 / AI 生成 Token（终端显示明文，直接复制）
-docker exec -it qingfeng-image-host node cli.js token          # 只读
-docker exec -it qingfeng-image-host node cli.js token --write  # 读写（上传）
 ```
 
-### 3. 更新版本
+#### 无注释版（直接复制）
+
+先复制这一块启动容器。如果已用上面的带注释版启动，直接跳到密码设置。以 root 登录且没有 `sudo` 时，去掉第一行的 `sudo`。
 
 ```bash
-docker pull ghcr.io/sseven01/qingfeng-image-host:master
-docker rm -f qingfeng-image-host
-# 重新执行上面的 docker run（数据都在主文件夹里，不丢）
+sudo install -d -m 0755 -o 1001 -g 1001 /data/qingfeng-image-host &&
+docker pull ghcr.io/sseven01/qingfeng-image-host:master &&
+docker run -d --name qingfeng-image-host --restart unless-stopped \
+  -p 3010:3000 \
+  -v /data/qingfeng-image-host:/app/storage \
+  ghcr.io/sseven01/qingfeng-image-host:master
 ```
 
-### docker-compose 方式（可选）
-
-在项目目录的 `.env` 里写一行主文件夹路径即可（compose 用固定的配置键 `QF_ROOT` 读取；不写则默认当前目录）：
-
-```env
-QF_ROOT=/data/img
-```
+启动成功后，单独复制并执行密码命令。
 
 ```bash
-docker-compose up -d --build        # 默认本地构建（build: .）
-docker-compose down                 # 停止
-docker-compose logs -f              # 看日志
+docker exec -it qingfeng-image-host node cli.js password
 ```
 
-改为拉取镜像：把 `docker-compose.yml` 里的 `build: .` 换成 `image: ghcr.io/sseven01/qingfeng-image-host:master`。
+输入至少 6 位密码后按回车，再输入同一个密码确认。**输入时终端不会显示字符。** 如果误按回车导致密码为空，重新执行密码命令即可。
 
-上线后配合 Nginx 反向代理 + HTTPS（见下文），并设置 `TRUST_PROXY=true`、`COOKIE_SECURE=true`。
+### 方式二：用脚本交互式部署
+
+把项目里的 `deploy.sh` 上传到服务器，在脚本所在目录运行：
+
+```bash
+bash deploy.sh
+```
+
+按提示选择容器名、宿主机端口和数据目录。直接回车使用默认值，其中端口默认是 `3000`，也可以输入 `3010` 或其他空闲端口。脚本会拉取同一个 GHCR 镜像并启动容器。首次部署完成后，运行脚本打印的密码命令完成初始化。
+
+### 登录与检查
+
+- 用 `docker ps --filter name=qingfeng-image-host` 查看容器状态。启动异常时用 `docker logs --tail 50 qingfeng-image-host` 查看日志。
+- 直接访问时，打开 `http://服务器IP:3010`。如果连不上，确认使用的是实际映射端口，以及防火墙或安全组是否放行该端口。
+- 用域名访问时，将 Nginx 或 1Panel 反代指向 `http://127.0.0.1:3010`（反代与 Docker 在同一宿主机且可访问该端口时）。配置 HTTPS 后，在图床后台「设置」填写正式的 HTTPS 地址作为图片直链前缀。
+
+### 更新已有容器
+
+先确认现有容器的镜像、端口和数据挂载。把命令里的名称换成实际容器名。
+
+```bash
+docker inspect qingfeng-image-host --format '{{.Config.Image}} {{json .Mounts}} {{json .HostConfig.PortBindings}}'
+```
+
+拉取新镜像成功后，再用 `docker rm -f qingfeng-image-host` 删除旧容器，并按原端口、数据挂载和环境变量重新执行 `docker run`。沿用原数据目录即可继续使用原有图片和密码。需要固定版本时，在拉取和启动命令中使用同一个版本标签，例如 `v0.2.1`。
+
+### Docker Compose（本地构建）
+
+在项目目录执行 `docker compose up -d --build`。可在 `.env` 中设置 `QF_ROOT=/data/qingfeng-image-host` 指定宿主机数据目录，默认挂载项目目录。若宿主机的 `3000` 已被占用，在 `docker-compose.yml` 中将端口映射改为 `3010:3000` 或其他空闲端口。
+
 
 ## 配置
 

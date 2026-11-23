@@ -53,9 +53,9 @@ async function cmdPassword(argv) {
   guardEnvOverride("APP_PASSWORD", "后台登录密码");
   let password = argv[0];
   if (!password) {
-    password = await prompt("新密码：", { hidden: true });
-    if (!password) fail("密码不能为空");
-    const confirm = await prompt("再次输入：", { hidden: true });
+    password = await prompt("请输入后台登录密码（至少 6 位，输入时不会显示字符），然后按回车：", { hidden: true });
+    if (!password) fail("密码不能为空，请重新运行命令并输入密码后再按回车。");
+    const confirm = await prompt("请再次输入同一个密码，然后按回车：", { hidden: true });
     if (confirm !== password) fail("两次输入不一致");
   }
   if (password.length < 6) fail("密码至少 6 位");
