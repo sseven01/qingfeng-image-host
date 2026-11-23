@@ -13,6 +13,7 @@
  */
 const crypto = require("crypto");
 const readline = require("readline");
+const { Writable } = require("stream");
 const { configPath, readConfig, saveConfig, resolveValue, hasValue, valueSource } = require("./config");
 
 function fail(message) {
@@ -29,22 +30,22 @@ function guardEnvOverride(envName, what) {
   }
 }
 
-function prompt(question, { hidden = false } = {}) {
+function promptPassword(question) {
+  // 丢弃 readline 的回显和光标控制，提示直接写到终端。
+  const output = new Writable({
+    write(_chunk, _encoding, callback) {
+      callback();
+    },
+  });
+  const rl = readline.createInterface({ input: process.stdin, output, terminal: true });
+  process.stderr.write(question + "\n");
+
   return new Promise((resolve) => {
-    if (hidden) {
-      // 手动打印提示，随后接管 readline 回显以隐藏输入
-      console.log(question);
-    }
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: true });
-    if (hidden) {
-      rl._writeToOutput = function (str) {
-        if (str.includes("\n")) rl.output.write("\n");
-      };
-    }
-    const ask = hidden ? "" : question;
-    rl.question(ask, (answer) => {
-      rl.close();
+    rl.once("close", () => resolve(""));
+    rl.once("SIGINT", () => process.exit(130));
+    rl.question("", (answer) => {
       resolve(answer.trim());
+      rl.close();
     });
   });
 }
@@ -53,9 +54,9 @@ async function cmdPassword(argv) {
   guardEnvOverride("APP_PASSWORD", "后台登录密码");
   let password = argv[0];
   if (!password) {
-    password = await prompt("请输入后台登录密码（至少 6 位，输入时不会显示字符），然后按回车：", { hidden: true });
+    password = await promptPassword("请输入后台登录密码（至少 6 位，输入时不会显示字符），然后按回车：");
     if (!password) fail("密码不能为空，请重新运行命令并输入密码后再按回车。");
-    const confirm = await prompt("请再次输入同一个密码，然后按回车：", { hidden: true });
+    const confirm = await promptPassword("请再次输入同一个密码，然后按回车：");
     if (confirm !== password) fail("两次输入不一致");
   }
   if (password.length < 6) fail("密码至少 6 位");
