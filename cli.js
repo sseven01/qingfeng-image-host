@@ -33,7 +33,7 @@ function prompt(question, { hidden = false } = {}) {
   return new Promise((resolve) => {
     if (hidden) {
       // 手动打印提示，随后接管 readline 回显以隐藏输入
-      process.stdout.write(question);
+      console.log(question);
     }
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: true });
     if (hidden) {
