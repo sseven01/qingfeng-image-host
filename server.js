@@ -4,6 +4,8 @@ const crypto = require("crypto");
 const fs = require("fs");
 const fsp = require("fs/promises");
 const path = require("path");
+const { pipeline } = require("stream/promises");
+const { encodeBackup, readBackup, invalid } = require("./backup");
 
 const express = require("express");
 const session = require("express-session");
@@ -27,6 +29,20 @@ const uploadRoot = resolveStorageDir("UPLOAD_DIR", "uploads");
 const dataRoot = resolveStorageDir("DATA_DIR", "data");
 const thumbRoot = resolveStorageDir("THUMB_DIR", "thumbs");
 const metaPath = path.join(dataRoot, "meta.json");
+const workFolder = "/.qingfeng-restore";
+const incomingBackup = multer({ dest: dataRoot, limits: { files: 1, fields: 2 } });
+const rollbackBackup = path.join(dataRoot, "before-restore.qfbackup");
+const byName = new Intl.Collator("zh-CN", { numeric: true });
+let storageQueue = Promise.resolve();
+
+function storageOperation(handler) {
+  return (req, res, next) => {
+    const operation = storageQueue.then(() => handler(req, res, next));
+    storageQueue = operation.catch(() => {});
+    operation.catch(next);
+  };
+}
+
 const port = Number(process.env.PORT || 3000);
 // 敏感项与普通配置均为「环境变量（可选） > data/config.json > 默认值」
 // 上传大小在启动时读取一次（multer 限制），后台修改需重启生效
@@ -85,7 +101,7 @@ async function readMeta() {
 
 async function writeMeta(meta) {
   await fsp.mkdir(dataRoot, { recursive: true });
-  const temp = `${metaPath}.${Date.now()}.tmp`;
+  const temp = `${metaPath}.${crypto.randomUUID()}.tmp`;
   await fsp.writeFile(temp, JSON.stringify(meta, null, 2), "utf8");
   await fsp.rename(temp, metaPath);
 }
@@ -131,8 +147,16 @@ function normalizeFolder(input = "/") {
   if (!value.startsWith("/")) value = `/${value}`;
   value = path.posix.normalize(value);
   if (value === ".") value = "/";
-  if (value.includes("..")) throw new Error("目录路径不合法");
+  if (value.includes("..") || value.includes(":") || value.includes("\0") || withinFolder(value.toLowerCase(), workFolder)) throw new Error("目录路径不合法");
   return value === "/" ? "/" : value.replace(/\/+$/, "");
+}
+
+function withinFolder(value, folder) {
+  return value === folder || value.startsWith(`${folder}/`);
+}
+
+function pathKey(value) {
+  return value.toLowerCase();
 }
 
 function folderToDisk(folder) {
@@ -153,8 +177,8 @@ function normalizePublicPath(input) {
   let value = String(input || "").replace(/\\/g, "/").trim();
   if (!value.startsWith("/")) value = `/${value}`;
   value = path.posix.normalize(value);
-  if (value === "/" || value.includes("..")) throw new Error("文件路径不合法");
-  return value;
+  if (value === "/") throw new Error("文件路径不合法");
+  return normalizeFolder(value);
 }
 
 function sanitizeName(input, fallback = "file") {
@@ -215,12 +239,12 @@ async function listFolders(current = "/") {
   const folder = folderToDisk(current);
   const entries = await fsp.readdir(folder, { withFileTypes: true }).catch(() => []);
   return entries
-    .filter((entry) => entry.isDirectory())
+    .filter((entry) => entry.isDirectory() && !(current === "/" && entry.name.toLowerCase() === workFolder.slice(1)))
     .map((entry) => ({
       name: entry.name,
       path: path.posix.join(normalizeFolder(current), entry.name)
     }))
-    .sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
+    .sort((a, b) => byName.compare(a.name, b.name));
 }
 
 function buildRecursiveImageCounts(images) {
@@ -295,11 +319,12 @@ app.get("/api/settings", requireAuth, (req, res) => {
       baseUrl: valueSource("BASE_URL", "baseUrl"),
       maxFileSizeMb: valueSource("MAX_FILE_SIZE_MB", "maxFileSizeMb")
     },
-    configPath
+    configPath,
+    rollbackAvailable: fs.existsSync(rollbackBackup)
   });
 });
 
-app.post("/api/settings", requireAuth, (req, res) => {
+app.post("/api/settings", requireAuth, storageOperation(async (req, res) => {
   const body = req.body || {};
   const patch = {};
   let restartRequired = false;
@@ -333,9 +358,246 @@ app.post("/api/settings", requireAuth, (req, res) => {
       maxFileSizeMb: valueSource("MAX_FILE_SIZE_MB", "maxFileSizeMb")
     }
   });
-});
+}));
 
-app.get("/api/tree", requireAuthOrToken, async (req, res, next) => {
+function backupPath(value, rootAllowed = false) {
+  if (typeof value !== "string" || (!rootAllowed && value === "/") ||
+      !/^\/(?:[^/]+(?:\/[^/]+)*)?$/.test(value) ||
+      /[\\:\x00-\x1f<>"|?*]/.test(value) ||
+      value.split("/").slice(1).some((part) => /[ .]$/.test(part) ||
+        /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(part))) {
+    throw invalid("备份包含无效路径");
+  }
+  try {
+    if (normalizeFolder(value) === value) return value;
+  } catch {}
+  throw invalid("备份包含无效路径");
+}
+
+function validateBackup(manifest) {
+  const { folders, images, settings } = manifest;
+  if (!Array.isArray(folders) || !Array.isArray(images) || !settings ||
+      typeof settings.baseUrl !== "string" || !/^https?:\/\/[^\s]+$/i.test(settings.baseUrl) ||
+      !Number.isInteger(settings.maxFileSizeMb) || settings.maxFileSizeMb < 1 || settings.maxFileSizeMb > 512) {
+    throw invalid("备份清单无效");
+  }
+  const dirs = new Set(["/"]);
+  for (const folder of folders) {
+    if (dirs.has(pathKey(backupPath(folder)))) throw invalid("目录路径重复");
+    dirs.add(pathKey(folder));
+  }
+  const exactDirs = new Set(["/", ...folders]);
+  const ids = new Set();
+  const usedPaths = new Set();
+  for (const image of images) {
+    if (!image || typeof image.id !== "string" || !image.id || ids.has(image.id) ||
+        !exactDirs.has(backupPath(image.folder, true)) ||
+        typeof image.filename !== "string" ||
+        image.path !== path.posix.join(image.folder, image.filename) ||
+        path.posix.basename(image.path) !== image.filename ||
+        !allowedExts.has(path.extname(image.filename).toLowerCase()) ||
+        !allowedMimes.has(image.mime) || !Number.isSafeInteger(image.size) || image.size < 0 ||
+        typeof image.originalName !== "string" || typeof image.createdAt !== "string" ||
+        !Number.isFinite(Date.parse(image.createdAt))) {
+      throw invalid("备份图片记录无效");
+    }
+    ids.add(image.id);
+    const key = pathKey(backupPath(image.path));
+    if (usedPaths.has(key) || dirs.has(key)) throw invalid("备份图片路径冲突");
+    usedPaths.add(key);
+  }
+  for (const folder of folders) {
+    if (!exactDirs.has(path.posix.dirname(folder))) throw invalid("备份缺少父目录");
+  }
+}
+
+async function backupManifest() {
+  const meta = await readMeta();
+  const folders = [];
+  async function collect(parent) {
+    for (const folder of await listFolders(parent)) {
+      folders.push(folder.path);
+      await collect(folder.path);
+    }
+  }
+  await collect("/");
+  const manifest = {
+    folders,
+    images: meta.images,
+    settings: {
+      baseUrl: currentBaseUrl(),
+      maxFileSizeMb: Number(resolveValue("MAX_FILE_SIZE_MB", "maxFileSizeMb", 10))
+    }
+  };
+  validateBackup(manifest);
+  return manifest;
+}
+
+async function planMerge(manifest, current) {
+  const occupied = new Set(current.images.map((image) => pathKey(image.path)));
+  const ids = new Set(current.images.map((image) => image.id));
+  const blocked = new Set();
+  const existing = new Map();
+  async function collect(dir, relative) {
+    for (const entry of await fsp.readdir(dir, { withFileTypes: true })) {
+      const item = path.posix.join(relative, entry.name);
+      if (item.toLowerCase() === workFolder) continue;
+      existing.set(pathKey(item), { item, isDirectory: entry.isDirectory() });
+      if (entry.isDirectory()) await collect(path.join(dir, entry.name), item);
+    }
+  }
+  await collect(uploadRoot, "/");
+  const skippedFolders = [];
+  const folders = [];
+  const skippedImages = [];
+  const images = [];
+  for (const folder of [...manifest.folders].sort((a, b) => a.length - b.length)) {
+    const entry = existing.get(pathKey(folder));
+    if (blocked.has(path.posix.dirname(folder)) || (entry && (!entry.isDirectory || entry.item !== folder))) {
+      blocked.add(folder);
+      skippedFolders.push(folder);
+    } else if (!entry) {
+      folders.push(folder);
+    }
+  }
+  for (const image of manifest.images) {
+    const key = pathKey(image.path);
+    if (ids.has(image.id) || blocked.has(image.folder) || occupied.has(key) || existing.has(key)) {
+      skippedImages.push(image.path);
+    } else {
+      images.push(image);
+    }
+  }
+  return { folders, images, skippedFolders, skippedImages };
+}
+
+function backupFilename() {
+  return `qingfeng-${new Date().toISOString().slice(0, 10)}.qfbackup`;
+}
+
+app.get("/api/backup", requireAuth, storageOperation(async (req, res) => {
+  const manifest = await backupManifest();
+  res.set("Cache-Control", "no-store");
+  res.attachment(backupFilename());
+  await pipeline(encodeBackup(manifest, fileToDisk), res);
+}));
+
+app.get("/api/backup/before-restore", requireAuth, storageOperation(async (req, res, next) => {
+  res.set("Cache-Control", "no-store");
+  await new Promise((resolve) => {
+    res.download(rollbackBackup, `before-restore-${backupFilename()}`, (error) => {
+      if (error) next(error);
+      resolve();
+    });
+  });
+}));
+
+async function mergeBackup(stage, plan, current) {
+  const created = [];
+  try {
+    for (const folder of plan.folders) {
+      const dest = folderToDisk(folder);
+      await fsp.mkdir(dest);
+      created.push(dest);
+    }
+    for (const image of plan.images) {
+      const dest = fileToDisk(image.path);
+      await fsp.rename(stage(image.path), dest);
+      created.push(dest);
+    }
+    await writeMeta({ ...current, images: [...current.images, ...plan.images] });
+  } catch (error) {
+    for (const dest of created.reverse()) await fsp.rm(dest, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+async function replaceBackup(stageRoot, previousRoot, manifest) {
+  const snapshot = await backupManifest();
+  const temp = `${rollbackBackup}.${crypto.randomUUID()}.tmp`;
+  try {
+    await pipeline(encodeBackup(snapshot, fileToDisk), fs.createWriteStream(temp, { flags: "wx", mode: 0o600 }));
+    await fsp.rename(temp, rollbackBackup);
+  } finally {
+    await fsp.rm(temp, { force: true });
+  }
+
+  const previousSettings = readConfig();
+  const moved = [];
+  let configChanged = false;
+  async function moveEntries(from, to, exclude) {
+    for (const entry of await fsp.readdir(from)) {
+      if (entry === exclude) continue;
+      const source = path.join(from, entry);
+      const target = path.join(to, entry);
+      await fsp.rename(source, target);
+      moved.push([target, source]);
+    }
+  }
+  try {
+    await moveEntries(uploadRoot, previousRoot, workFolder.slice(1));
+    await moveEntries(stageRoot, uploadRoot);
+    saveConfig(manifest.settings);
+    configChanged = true;
+    await writeMeta({ images: manifest.images });
+  } catch (error) {
+    for (const [from, to] of moved.reverse()) await fsp.rename(from, to);
+    if (configChanged) {
+      saveConfig({ baseUrl: previousSettings.baseUrl, maxFileSizeMb: previousSettings.maxFileSizeMb });
+    }
+    throw error;
+  }
+}
+
+app.post("/api/backup/restore", requireAuth, incomingBackup.single("backup"), storageOperation(async (req, res) => {
+  if (!req.file) throw invalid("请选择备份文件");
+  let work;
+  let preserveWork = false;
+  try {
+    const { mode } = req.body;
+    const preview = req.body.preview === "true";
+    if (mode !== "merge" && mode !== "replace") throw invalid("请选择恢复方式");
+    if (!preview) {
+      const workRoot = path.join(uploadRoot, workFolder.slice(1));
+      await fsp.mkdir(workRoot, { recursive: true, mode: 0o700 });
+      work = await fsp.mkdtemp(path.join(workRoot, "restore-"));
+      await fsp.mkdir(path.join(work, "incoming"));
+      await fsp.mkdir(path.join(work, "previous"));
+    }
+    const stage = (value) => path.join(work, "incoming", `.${value}`);
+    const manifest = await readBackup(req.file.path, validateBackup, preview ? null : stage);
+    const current = await readMeta();
+    const plan = await planMerge(manifest, current);
+    if (preview) {
+      return res.json({
+        images: manifest.images.length, folders: manifest.folders.length,
+        conflicts: plan.skippedImages.length + plan.skippedFolders.length,
+        currentImages: current.images.length
+      });
+    }
+    if (mode === "merge") {
+      await mergeBackup(stage, plan, current);
+      return res.json({
+        restored: plan.images.length, skippedImages: plan.skippedImages, skippedFolders: plan.skippedFolders
+      });
+    }
+    for (const folder of manifest.folders) await fsp.mkdir(stage(folder), { recursive: true });
+    const previous = path.join(work, "previous");
+    try {
+      await replaceBackup(path.join(work, "incoming"), previous, manifest);
+    } catch (error) {
+      preserveWork = (await fsp.readdir(previous)).length > 0;
+      throw error;
+    }
+    res.json({ restored: manifest.images.length, rollback: true });
+  } finally {
+    await fsp.rm(req.file.path, { force: true });
+    if (work && !preserveWork) await fsp.rm(work, { recursive: true, force: true });
+  }
+}));
+
+
+app.get("/api/tree", requireAuthOrToken, storageOperation(async (req, res, next) => {
   try {
     await ensureBaseDirs();
     const meta = await readMeta();
@@ -344,29 +606,38 @@ app.get("/api/tree", requireAuthOrToken, async (req, res, next) => {
   } catch (error) {
     next(error);
   }
-});
+}));
 
-app.get("/api/items", requireAuthOrToken, async (req, res, next) => {
+app.get("/api/items", requireAuthOrToken, storageOperation(async (req, res, next) => {
   try {
     const folder = normalizeFolder(req.query.path || "/");
-    await fsp.mkdir(folderToDisk(folder), { recursive: true });
     const meta = await readMeta();
     const imageCounts = buildRecursiveImageCounts(meta.images);
     const folders = (await listFolders(folder)).map((item) => ({
       ...item,
       imageCount: imageCounts.get(item.path) || 0
     }));
-    const images = meta.images
-      .filter((image) => image.folder === folder)
-      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-      .map(withImageUrl);
-    res.json({ path: folder, folders, images });
+    const sortImages = req.query.sort === "name"
+      ? (a, b) => byName.compare(a.filename, b.filename)
+      : (a, b) => new Date(b.createdAt) - new Date(a.createdAt);
+    const allImages = meta.images.filter((image) => image.folder === folder).sort(sortImages);
+    if (req.query.page === undefined) {
+      return res.json({ path: folder, folders, images: allImages.map(withImageUrl) });
+    }
+    const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(200, Math.max(1, Number.parseInt(req.query.limit, 10) || 50));
+    const start = (page - 1) * limit;
+    res.json({
+      path: folder, folders, page, total: allImages.length,
+      hasMore: start + limit < allImages.length,
+      images: allImages.slice(start, start + limit).map(withImageUrl)
+    });
   } catch (error) {
     next(error);
   }
-});
+}));
 
-app.get("/api/images/search", requireAuthOrToken, async (req, res, next) => {
+app.get("/api/images/search", requireAuthOrToken, storageOperation(async (req, res, next) => {
   try {
     const query = String(req.query.q || "").trim().toLowerCase();
     if (!query) return res.json({ images: [] });
@@ -376,16 +647,18 @@ app.get("/api/images/search", requireAuthOrToken, async (req, res, next) => {
         const haystack = `${image.filename} ${image.originalName} ${image.path} ${image.folder}`.toLowerCase();
         return haystack.includes(query);
       })
-      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      .sort(req.query.sort === "name"
+        ? (a, b) => byName.compare(a.filename, b.filename)
+        : (a, b) => new Date(b.createdAt) - new Date(a.createdAt))
       .slice(0, 200)
       .map(withImageUrl);
     res.json({ images });
   } catch (error) {
     next(error);
   }
-});
+}));
 
-app.post("/api/folders", requireAuth, async (req, res, next) => {
+app.post("/api/folders", requireAuth, storageOperation(async (req, res, next) => {
   try {
     const parent = normalizeFolder(req.body.parent || "/");
     const folder = buildFolderPath(parent, req.body.path || req.body.name);
@@ -394,9 +667,43 @@ app.post("/api/folders", requireAuth, async (req, res, next) => {
   } catch (error) {
     next(error);
   }
-});
+}));
 
-app.delete("/api/folders", requireAuth, async (req, res, next) => {
+app.patch("/api/folders", requireAuth, storageOperation(async (req, res) => {
+  const source = normalizeFolder(req.body.path);
+  if (source === "/") throw invalid("不能移动或重命名根目录");
+  const hasName = typeof req.body.name === "string";
+  if (hasName && (!req.body.name.trim() || /[\\/]/.test(req.body.name))) {
+    throw invalid("请输入单个目录名称");
+  }
+  const parent = normalizeFolder(req.body.parent ?? path.posix.dirname(source));
+  if (withinFolder(pathKey(parent), pathKey(source))) throw invalid("不能移动到当前目录或其子目录");
+  const target = hasName ? buildFolderPath(parent, req.body.name) : path.posix.join(parent, path.posix.basename(source));
+  if (target === source) return res.json({ ok: true, path: source });
+  const oldDisk = folderToDisk(source);
+  const newDisk = folderToDisk(target);
+  if (!(await fsp.lstat(oldDisk)).isDirectory() || !(await fsp.lstat(folderToDisk(parent))).isDirectory()) {
+    throw invalid("源目录或目标目录不存在");
+  }
+  const caseOnly = process.platform === "win32" && pathKey(source) === pathKey(target);
+  if (!caseOnly && fs.existsSync(newDisk)) throw invalid("目标目录下已有同名项目");
+  const meta = await readMeta();
+  for (const image of meta.images) {
+    if (!withinFolder(image.folder, source)) continue;
+    image.folder = target + image.folder.slice(source.length);
+    image.path = path.posix.join(image.folder, image.filename);
+  }
+  await fsp.rename(oldDisk, newDisk);
+  try {
+    await writeMeta(meta);
+  } catch (error) {
+    await fsp.rename(newDisk, oldDisk);
+    throw error;
+  }
+  res.json({ ok: true, path: target });
+}));
+
+app.delete("/api/folders", requireAuth, storageOperation(async (req, res, next) => {
   try {
     const folder = normalizeFolder(req.query.path);
     if (folder === "/") return res.status(400).json({ error: "不能删除根目录" });
@@ -410,9 +717,9 @@ app.delete("/api/folders", requireAuth, async (req, res, next) => {
   } catch (error) {
     next(error);
   }
-});
+}));
 
-app.post("/api/upload", requireAuthOrWriteToken, upload.array("images", 50), async (req, res, next) => {
+app.post("/api/upload", requireAuthOrWriteToken, upload.array("images", 50), storageOperation(async (req, res, next) => {
   try {
     const folder = normalizeFolder(req.body.path || "/");
     await fsp.mkdir(folderToDisk(folder), { recursive: true });
@@ -449,9 +756,9 @@ app.post("/api/upload", requireAuthOrWriteToken, upload.array("images", 50), asy
   } catch (error) {
     next(error);
   }
-});
+}));
 
-app.patch("/api/images/:id", requireAuth, async (req, res, next) => {
+app.patch("/api/images/:id", requireAuth, storageOperation(async (req, res, next) => {
   try {
     const meta = await readMeta();
     const image = meta.images.find((item) => item.id === req.params.id);
@@ -481,9 +788,9 @@ app.patch("/api/images/:id", requireAuth, async (req, res, next) => {
   } catch (error) {
     next(error);
   }
-});
+}));
 
-app.delete("/api/images/:id", requireAuth, async (req, res, next) => {
+app.delete("/api/images/:id", requireAuth, storageOperation(async (req, res, next) => {
   try {
     const meta = await readMeta();
     const index = meta.images.findIndex((item) => item.id === req.params.id);
@@ -495,7 +802,7 @@ app.delete("/api/images/:id", requireAuth, async (req, res, next) => {
   } catch (error) {
     next(error);
   }
-});
+}));
 
 app.get("/i/*", async (req, res, next) => {
   try {
@@ -514,7 +821,8 @@ app.use((error, req, res, next) => {
   if (error instanceof multer.MulterError) {
     return res.status(400).json({ error: error.message });
   }
-  const status = error.code === "ENOENT" ? 404 : 500;
+  if (res.headersSent) return next(error);
+  const status = error.status || (error.code === "ENOENT" ? 404 : 500);
   const message = status === 404 ? "资源不存在" : error.message || "服务器错误";
   res.status(status).json({ error: message });
 });

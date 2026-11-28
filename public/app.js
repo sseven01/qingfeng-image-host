@@ -189,10 +189,20 @@ function renderTreeNode(node, depth, query) {
   return true;
 }
 
+const imageSort = $("#imageSort");
+imageSort.addEventListener("change", async () => {
+  try {
+    await loadItems();
+  } catch (error) {
+    showToast(error.message, "error");
+  }
+});
+
 async function loadItems(append = false) {
+  const sort = imageSort.value;
   const imageQuery = getImageQuery();
   if (imageQuery) {
-    const data = await api(`/api/images/search?q=${encodeURIComponent(imageQuery)}`);
+    const data = await api(`/api/images/search?q=${encodeURIComponent(imageQuery)}&sort=${sort}`);
     foldersSection.classList.add("hidden");
     imagesTitle.textContent = "搜索结果";
     imagesSummary.textContent = `${data.images.length} 张图片`;
@@ -203,7 +213,7 @@ async function loadItems(append = false) {
   }
 
   const page = append ? (state.currentPage || 1) + 1 : 1;
-  const data = await api(`/api/items?path=${encodeURIComponent(state.path)}&page=${page}&limit=50`);
+  const data = await api(`/api/items?path=${encodeURIComponent(state.path)}&page=${page}&limit=50&sort=${sort}`);
   state.currentPage = data.page;
   state.hasMore = data.hasMore;
 
@@ -251,14 +261,98 @@ function openFolderContextMenu(event, folder) {
   event.preventDefault();
   if (!folder || folder.path === "/") return;
   state.contextFolder = folder;
-  folderContextMenu.style.left = `${event.clientX}px`;
-  folderContextMenu.style.top = `${event.clientY}px`;
   folderContextMenu.classList.remove("hidden");
+  const bounds = folderContextMenu.getBoundingClientRect();
+  folderContextMenu.style.left = `${Math.max(0, Math.min(event.clientX, innerWidth - bounds.width))}px`;
+  folderContextMenu.style.top = `${Math.max(0, Math.min(event.clientY, innerHeight - bounds.height))}px`;
 }
 
 function closeFolderContextMenu() {
   folderContextMenu.classList.add("hidden");
 }
+
+const editFolderDialog = $("#editFolderDialog");
+const editFolderName = $("#editFolderName");
+const folderDestinations = $("#folderDestinations");
+const saveEditFolderBtn = $("#saveEditFolderBtn");
+const editFolderError = $("#editFolderError");
+let folderEdit;
+
+function addDestination(node, depth, source) {
+  if (isSameOrChild(node.path, source)) return;
+  const label = document.createElement("label");
+  label.style.paddingInlineStart = `${Math.min(depth, 12) * 14}px`;
+  label.title = node.path;
+  const choice = document.createElement("input");
+  choice.type = "radio";
+  choice.name = "destination";
+  choice.value = node.path;
+  choice.disabled = node.path === parentPath(source);
+  choice.addEventListener("change", () => {
+    folderEdit.parent = node.path;
+    saveEditFolderBtn.disabled = false;
+  });
+  label.append(choice, node.path === "/" ? "根目录" : node.name);
+  folderDestinations.append(label);
+  node.children.forEach((child) => addDestination(child, depth + 1, source));
+}
+
+function openFolderEditor(mode) {
+  const folder = state.contextFolder;
+  closeFolderContextMenu();
+  if (!folder) return;
+  folderEdit = { mode, source: folder.path };
+  const rename = mode === "rename";
+  $("#editFolderTitle").textContent = rename ? "重命名目录" : `移动「${folder.name}」`;
+  $("#editFolderNameField").hidden = !rename;
+  $("#folderDestinationField").hidden = rename;
+  editFolderName.required = rename;
+  editFolderName.value = folder.name;
+  editFolderError.textContent = "";
+  folderDestinations.replaceChildren();
+  if (!rename && state.tree) addDestination(state.tree, 0, folder.path);
+  saveEditFolderBtn.disabled = !rename;
+  editFolderDialog.showModal();
+  if (rename) editFolderName.select();
+}
+
+$("#renameFolderMenuBtn").addEventListener("click", () => openFolderEditor("rename"));
+$("#moveFolderMenuBtn").addEventListener("click", () => openFolderEditor("move"));
+$("#cancelEditFolderBtn").addEventListener("click", () => editFolderDialog.close());
+editFolderDialog.addEventListener("cancel", (event) => {
+  if (folderEdit.busy) event.preventDefault();
+});
+$("#editFolderForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const { source, mode, parent, busy } = folderEdit;
+  if (busy || (mode === "move" && !parent)) return;
+  folderEdit.busy = saveEditFolderBtn.disabled = $("#cancelEditFolderBtn").disabled = true;
+  editFolderError.textContent = "";
+  try {
+    const data = await api("/api/folders", {
+      method: "PATCH",
+      body: JSON.stringify(mode === "rename"
+        ? { path: source, name: editFolderName.value.trim() }
+        : { path: source, parent })
+    });
+    const relocate = (value) => isSameOrChild(value, source) ? data.path + value.slice(source.length) : value;
+    state.path = isSameOrChild(state.path, source) ? relocate(state.path) : data.path;
+    state.expandedFolders = new Set([...state.expandedFolders].map(relocate));
+    folderSearchInput.value = "";
+    if (data.path !== source && state.lastUploaded.some((image) => isSameOrChild(image.folder, source))) {
+      state.lastUploaded = [];
+      uploadResult.classList.add("hidden");
+    }
+    editFolderDialog.close();
+    await loadAll();
+    showToast(mode === "rename" ? "目录已重命名" : "目录已移动", "success");
+  } catch (error) {
+    if (editFolderDialog.open) editFolderError.textContent = error.message;
+    else showToast(error.message, "error");
+  } finally {
+    folderEdit.busy = saveEditFolderBtn.disabled = $("#cancelEditFolderBtn").disabled = false;
+  }
+});
 
 function showDeleteFolderDialog(folder) {
   if (!folder) return;
@@ -658,6 +752,7 @@ dropZone.addEventListener("drop", async (event) => {
 });
 
 function closeSettingsDialog() {
+  if (backupBusy) return;
   settingsDialog.classList.add("hidden");
   settingsError.textContent = "";
 }
@@ -666,6 +761,7 @@ async function openSettingsDialog() {
   settingsError.textContent = "";
   try {
     const data = await api("/api/settings");
+    $("#rollbackDownload").hidden = !data.rollbackAvailable;
     baseUrlInput.value = data.baseUrl || "";
     maxFileSizeInput.value = data.maxFileSizeMb || 10;
     const readState = data.tokens.read ? "已配置" : "未配置";
@@ -718,3 +814,147 @@ saveSettingsBtn.addEventListener("click", async () => {
     }
   }
 })();
+const resizeHandle = $("#sidebarResize");
+const sidebarPreference = "qingfeng-sidebar-width";
+let preferredWidth = Number(localStorage.getItem(sidebarPreference)) || 320;
+let resizePointer = null;
+
+function resizeSidebar(width, commit = false) {
+  const min = 230;
+  const max = Math.max(min, Math.min(560, appView.clientWidth - 420));
+  const size = Math.round(Math.min(max, Math.max(min, width)));
+  appView.style.setProperty("--sidebar-width", `${size}px`);
+  resizeHandle.setAttribute("aria-valuemin", min);
+  resizeHandle.setAttribute("aria-valuemax", max);
+  resizeHandle.setAttribute("aria-valuenow", size);
+  if (commit) {
+    preferredWidth = size;
+    localStorage.setItem(sidebarPreference, size);
+  }
+}
+
+new ResizeObserver(() => {
+  if (appView.clientWidth && resizePointer === null) resizeSidebar(preferredWidth);
+}).observe(appView);
+resizeHandle.addEventListener("pointerdown", (event) => {
+  if (event.button !== 0) return;
+  resizePointer = event.pointerId;
+  resizeHandle.setPointerCapture(event.pointerId);
+  appView.classList.add("resizing");
+});
+resizeHandle.addEventListener("pointermove", (event) => {
+  if (resizePointer === event.pointerId) resizeSidebar(event.clientX - appView.getBoundingClientRect().left);
+});
+resizeHandle.addEventListener("lostpointercapture", () => {
+  resizePointer = null;
+  appView.classList.remove("resizing");
+  resizeSidebar(Number(resizeHandle.getAttribute("aria-valuenow")), true);
+});
+resizeHandle.addEventListener("keydown", (event) => {
+  const width = Number(resizeHandle.getAttribute("aria-valuenow"));
+  const steps = { ArrowLeft: width - 16, ArrowRight: width + 16, Home: 230, End: 560 };
+  if (!Object.hasOwn(steps, event.key)) return;
+  event.preventDefault();
+  resizeSidebar(steps[event.key], true);
+});
+
+const backupFile = $("#backupFile");
+const backupMode = $("#backupMode");
+const previewBackupBtn = $("#previewBackupBtn");
+const restoreBackupBtn = $("#restoreBackupBtn");
+const backupStatus = $("#backupStatus");
+const backupProgress = $("#backupProgress");
+const backupSkipped = $("#backupSkipped");
+let backupPreview = null;
+let backupBusy = false;
+
+function resetBackupPreview() {
+  backupPreview = null;
+  backupStatus.textContent = "";
+  backupSkipped.hidden = true;
+  previewBackupBtn.disabled = !backupFile.files.length;
+  restoreBackupBtn.disabled = true;
+}
+
+function submitBackup(file, mode, preview) {
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    const form = new FormData();
+    form.set("mode", mode);
+    form.set("preview", String(preview));
+    form.set("backup", file);
+    request.open("POST", "/api/backup/restore");
+    request.responseType = "json";
+    request.upload.onprogress = (event) => {
+      if (event.lengthComputable) backupProgress.value = event.loaded / event.total * 100;
+    };
+    request.upload.onload = () => {
+      backupProgress.removeAttribute("value");
+      backupStatus.textContent = preview ? "正在校验备份…" : "正在校验并恢复备份…";
+    };
+    request.onload = () => {
+      if (request.status >= 200 && request.status < 300) resolve(request.response);
+      else reject(new Error(request.response?.error || "备份请求失败"));
+    };
+    request.onerror = () => reject(new Error("网络连接中断，请检查当前数据后重试"));
+    request.send(form);
+  });
+}
+
+async function runRestore(preview) {
+  const file = backupFile.files[0];
+  const mode = backupMode.value;
+  if (!file || backupBusy || (!preview && !backupPreview)) return;
+  if (!preview && mode === "replace" &&
+      !confirm("整站替换会覆盖当前图片、目录和可迁移设置。系统会先保存一份替换前备份。确定继续？")) return;
+
+  backupBusy = true;
+  backupFile.disabled = backupMode.disabled = previewBackupBtn.disabled = restoreBackupBtn.disabled = true;
+  saveSettingsBtn.disabled = cancelSettingsBtn.disabled = true;
+  backupSkipped.hidden = true;
+  backupProgress.hidden = false;
+  backupProgress.value = 0;
+  backupStatus.textContent = "正在上传备份…";
+  try {
+    const data = await submitBackup(file, mode, preview);
+    if (preview) {
+      backupPreview = data;
+      backupStatus.textContent = mode === "merge"
+        ? `已校验 ${data.images} 张图片、${data.folders} 个目录。合并时将跳过 ${data.conflicts} 项。`
+        : `已校验 ${data.images} 张图片、${data.folders} 个目录。当前的 ${data.currentImages} 张图片将被替换。`;
+      return;
+    }
+    backupPreview = null;
+    if (data.rollback) $("#rollbackDownload").hidden = false;
+    const skipped = [
+      ...(data.skippedFolders || []).map((name) => `目录  ${name}`),
+      ...(data.skippedImages || []).map((name) => `图片  ${name}`)
+    ];
+    backupSkipped.textContent = skipped.join("\n");
+    backupSkipped.hidden = !skipped.length;
+    backupStatus.textContent = data.rollback
+      ? `已替换，恢复 ${data.restored} 张图片。上传大小设置在重启后生效。`
+      : `已恢复 ${data.restored} 张图片，跳过 ${skipped.length} 项。`;
+    if (mode === "replace") {
+      state.path = "/";
+      state.lastUploaded = [];
+      uploadResult.classList.add("hidden");
+      state.expandedFolders = new Set(["/"]);
+      await openSettingsDialog();
+    }
+    await loadAll();
+  } catch (error) {
+    backupStatus.textContent = error.message;
+  } finally {
+    backupBusy = false;
+    backupProgress.hidden = true;
+    backupFile.disabled = backupMode.disabled = saveSettingsBtn.disabled = cancelSettingsBtn.disabled = false;
+    previewBackupBtn.disabled = !backupFile.files.length;
+    restoreBackupBtn.disabled = !backupPreview;
+  }
+}
+
+backupFile.addEventListener("change", resetBackupPreview);
+backupMode.addEventListener("change", resetBackupPreview);
+previewBackupBtn.addEventListener("click", () => runRestore(true));
+restoreBackupBtn.addEventListener("click", () => runRestore(false));

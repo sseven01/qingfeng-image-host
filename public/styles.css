@@ -106,7 +106,7 @@ button:hover {
 .app {
   min-height: 100vh;
   display: grid;
-  grid-template-columns: 320px 1fr;
+  grid-template-columns: var(--sidebar-width, 320px) 0 minmax(0, 1fr);
 }
 
 .sidebar {
@@ -602,12 +602,20 @@ section {
 .context-menu button {
   width: 100%;
   border: 0;
-  color: var(--danger);
+  color: var(--text);
   text-align: left;
   background: transparent;
 }
 
 .context-menu button:hover {
+  background: #f3f7f8;
+}
+
+#deleteFolderMenuBtn {
+  color: var(--danger);
+}
+
+#deleteFolderMenuBtn:hover {
   background: #fff1ef;
 }
 
@@ -755,5 +763,78 @@ section {
     right: 12px;
     bottom: 12px;
     width: calc(100vw - 24px);
+  }
+}
+
+
+.sidebar-resize {
+  width: 10px;
+  z-index: 2;
+  transform: translateX(-50%);
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.sidebar-resize:is(:hover, :focus-visible),
+.resizing .sidebar-resize {
+  background: var(--accent);
+  opacity: .6;
+}
+
+.resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+#editFolderDialog::backdrop {
+  background: rgba(23, 32, 38, .45);
+}
+
+.settings-field[hidden] {
+  display: none;
+}
+
+#folderDestinations,
+#backupSkipped {
+  max-height: 200px;
+  overflow: auto;
+}
+
+#folderDestinations label {
+  display: flex;
+  gap: 8px;
+  padding-block: 5px;
+  overflow-wrap: anywhere;
+}
+
+.backup-settings {
+  border-top: 1px solid var(--line);
+  margin-top: 14px;
+}
+
+.backup-downloads,
+.backup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+.backup-settings progress {
+  width: 100%;
+}
+
+#backupSkipped {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+#settingsDialog .dialog {
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+}
+
+@media (max-width: 820px) {
+  .sidebar-resize {
+    display: none;
   }
 }

@@ -21,7 +21,7 @@
     </main>
 
     <main id="appView" class="app hidden">
-      <aside class="sidebar">
+      <aside id="sidebar" class="sidebar">
         <div class="brand">
           <strong>青枫图床</strong>
           <div class="brand-actions">
@@ -35,6 +35,8 @@
         <div id="tree" class="tree"></div>
       </aside>
 
+      <div id="sidebarResize" class="sidebar-resize" role="separator" tabindex="0"
+        aria-label="调整目录侧栏宽度" aria-orientation="vertical" aria-controls="sidebar"></div>
       <section class="workspace">
         <header class="toolbar">
           <div>
@@ -85,6 +87,10 @@
           <div class="section-heading">
             <h2 id="imagesTitle">图片</h2>
             <span id="imagesSummary"></span>
+            <select id="imageSort" aria-label="图片排序">
+              <option value="date">最新上传</option>
+              <option value="name">按名称</option>
+            </select>
           </div>
           <div id="images" class="image-grid"></div>
           <div id="loadMoreContainer" class="hidden" style="text-align:center;margin-top:16px;">
@@ -123,8 +129,30 @@
     </template>
 
     <div id="folderContextMenu" class="context-menu hidden">
+      <button id="renameFolderMenuBtn" type="button">重命名</button>
+      <button id="moveFolderMenuBtn" type="button">移动到…</button>
       <button id="deleteFolderMenuBtn" type="button">删除目录</button>
     </div>
+
+    <dialog id="editFolderDialog" class="dialog" aria-labelledby="editFolderTitle">
+      <form id="editFolderForm">
+        <h2 id="editFolderTitle"></h2>
+        <label id="editFolderNameField" class="settings-field">
+          新目录名称
+          <input id="editFolderName" type="text" maxlength="200" autocomplete="off" />
+        </label>
+        <div id="folderDestinationField">
+          <p>选择目标目录</p>
+          <div id="folderDestinations" role="group" aria-label="目标目录"></div>
+        </div>
+        <p class="settings-hint">操作完成后，目录内图片的原直链会失效。</p>
+        <p id="editFolderError" class="error" role="alert"></p>
+        <div class="dialog-actions">
+          <button id="cancelEditFolderBtn" type="button">取消</button>
+          <button id="saveEditFolderBtn" type="submit">确认</button>
+        </div>
+      </form>
+    </dialog>
 
     <div id="deleteFolderDialog" class="dialog-backdrop hidden">
       <div class="dialog">
@@ -152,6 +180,29 @@
         </label>
         <p id="tokenStatus" class="settings-hint"></p>
         <p class="settings-hint">密码与 Token 不在网页上设置或展示，请在容器终端执行 <code>node cli.js password</code> / <code>node cli.js token</code>。</p>
+        <section class="backup-settings">
+          <h3>备份与恢复</h3>
+          <div class="backup-downloads">
+            <a href="/api/backup" download>下载完整备份</a>
+            <a id="rollbackDownload" href="/api/backup/before-restore" download hidden>下载替换前备份</a>
+          </div>
+          <label class="settings-field">备份文件
+            <input id="backupFile" type="file" accept=".qfbackup" />
+          </label>
+          <label class="settings-field">恢复方式
+            <select id="backupMode">
+              <option value="merge">合并恢复，保留现有设置</option>
+              <option value="replace">整站替换，应用备份设置</option>
+            </select>
+          </label>
+          <div class="backup-actions">
+            <button id="previewBackupBtn" type="button" disabled>检查备份</button>
+            <button id="restoreBackupBtn" type="button" disabled>恢复备份</button>
+          </div>
+          <p id="backupStatus" class="settings-hint" role="status"></p>
+          <progress id="backupProgress" aria-label="备份上传进度" max="100" hidden></progress>
+          <pre id="backupSkipped" hidden></pre>
+        </section>
         <p id="settingsError" class="error"></p>
         <div class="dialog-actions">
           <button id="cancelSettingsBtn" type="button">取消</button>
